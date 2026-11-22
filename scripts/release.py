@@ -80,7 +80,13 @@ def main():
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--target", default="x86_64-pc-windows-msvc")
     ap.add_argument("--cpu-only", action="store_true", help="build without the Vulkan GPU backend")
+    ap.add_argument("--require-gpu", action="store_true",
+                    help="fail unless the built exe contains the Vulkan GPU backend (CI releases)")
+    ap.add_argument("--require-installer", action="store_true",
+                    help="fail when Inno Setup is missing instead of building only the zip (CI releases)")
     a = ap.parse_args()
+    if a.require_gpu and a.cpu_only:
+        sys.exit("--require-gpu and --cpu-only contradict each other")
     version = workspace_version()
     host = host_triple()
 
@@ -102,6 +108,13 @@ def main():
     for built in (exe_src, settings_src):
         if not built.is_file():
             sys.exit(f"missing {built}")
+    gpu_libs = sorted(p for p in exe_src.parent.glob("ggml-*.dll"))  # GPU backend library, if the build produces one
+    if package.has_vulkan_backend(exe_src, *gpu_libs):
+        print("Vulkan GPU backend: included")
+    elif a.require_gpu:
+        sys.exit(f"{exe_src} has no Vulkan GPU backend: the build did not enable the vulkan feature")
+    else:
+        print("Vulkan GPU backend: NOT included (CPU-only build)")
 
     dist = ROOT / "dist"
     stage = dist / "stage"
@@ -116,7 +129,6 @@ def main():
                                                    encoding="utf-8", newline="\n")
     readme = (ROOT / "packaging" / "README.txt").read_text(encoding="utf-8").replace("{version}", version)
     (stage / "README.txt").write_text(readme, encoding="utf-8", newline="\r\n")
-    gpu_libs = sorted(p for p in exe_src.parent.glob("ggml-*.dll"))  # GPU backend library, if the build produces one
     extra = [Path(shutil.copy2(p, stage / p.name)) for p in gpu_libs]
     for p in extra:
         sign(p)
@@ -128,6 +140,8 @@ def main():
 
     iscc = find_iscc()
     if iscc is None:
+        if a.require_installer:
+            sys.exit("Inno Setup (ISCC.exe) not found: install Inno Setup 6 or set ISCC.")
         print("Inno Setup (ISCC.exe) not found: installer NOT built. Install Inno Setup 6 or set ISCC.")
         return
     subprocess.run([iscc, f"/DAppVersion={version}", f"/DStageDir={stage}", str(ROOT / "packaging" / "aloud-type.iss")],

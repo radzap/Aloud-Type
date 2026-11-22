@@ -35,6 +35,12 @@ class PortableZip(unittest.TestCase):
         names = self.build(extra_files=[self.d / "ggml-vulkan.dll"])
         self.assertIn("AloudType-0.1.0/ggml-vulkan.dll", names)
 
+    def test_vulkan_backend_is_detected_in_the_exe_or_a_ggml_dll(self):
+        exe, dll = self.d / "aloud-type.exe", self.d / "ggml-vulkan.dll"
+        self.assertFalse(package.has_vulkan_backend(exe))
+        dll.write_bytes(b"..ggml_vulkan: found 1 Vulkan devices..")
+        self.assertTrue(package.has_vulkan_backend(exe, dll))
+
     def test_zip_never_contains_user_data_or_models(self):
         for n in self.build():
             self.assertFalse(n.endswith((".bin", ".toml", ".gguf")), n)

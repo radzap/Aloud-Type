@@ -16,6 +16,15 @@ def build_zip(out, *, version, exe, settings_exe, licence, notices, readme, extr
             z.write(f, f"{top}/{f.name}")
 
 
+# Log prefix compiled in only from ggml-vulkan.cpp: present exactly when the Vulkan backend is linked.
+VULKAN_MARKER = b"ggml_vulkan"
+
+
+def has_vulkan_backend(*binaries):
+    """True when the exe (or a ggml-*.dll shipped beside it) contains the Vulkan GPU backend."""
+    return any(VULKAN_MARKER in Path(b).read_bytes() for b in binaries)
+
+
 def sign_command(path, env):
     """signtool command line when a certificate is configured, else None (ship unsigned)."""
     pfx = env.get("ALOUDTYPE_SIGN_PFX")
