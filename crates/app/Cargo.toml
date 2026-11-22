@@ -1,0 +1,23 @@
+[package]
+name = "aloud-type-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "aloud_type_app"
+
+[[bin]]
+name = "aloud-type"
+path = "src/main.rs"
+
+[dependencies]
+aloud-type-core.workspace = true
+aloud-type-config = { path = "../config" }
+
+[target.'cfg(windows)'.dependencies]
+aloud-type-platform-windows = { path = "../platform-windows" }
+aloud-type-recognizer = { path = "../recognizer" }
+
+[dev-dependencies]
+aloud-type-recognizer = { path = "../recognizer" }
