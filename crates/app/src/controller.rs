@@ -49,6 +49,13 @@ pub trait StartGate {
     fn check(&mut self) -> Option<String>;
 }
 
+/// Host seam: first-run setup. While it is incomplete a Dictation key press
+/// opens Settings instead of dictating.
+pub trait SetupGate {
+    fn complete(&mut self) -> bool;
+    fn open_settings(&mut self);
+}
+
 /// Platform seam: the typing fault recorded by the text sink, if any.
 pub trait TypingFaults {
     fn take(&mut self) -> Option<String>;
@@ -145,6 +152,7 @@ pub struct Controller<K: Keyboard, C: Clock + Clone> {
     session: Option<Session<C>>,
     latched: bool,
     residency: Option<Residency>,
+    setup: Option<Box<dyn SetupGate>>,
 }
 
 impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
@@ -165,12 +173,23 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             session: None,
             latched: false,
             residency: None,
+            setup: None,
         }
     }
 
     /// Tell the model's residency about Dictation start/end and idle ticks.
     pub fn set_residency(&mut self, r: Residency) {
         self.residency = Some(r);
+    }
+
+    /// Install the first-run check (absent means setup is never in the way).
+    pub fn set_setup_gate(&mut self, g: Box<dyn SetupGate>) {
+        self.setup = Some(g);
+    }
+
+    /// Apply a changed tap threshold or key kind (takes effect from the next press).
+    pub fn set_lifecycle(&mut self, cfg: LifecycleConfig) {
+        self.engine.set_config(cfg);
     }
 
     pub fn indicator(&self) -> Indicator {
@@ -229,6 +248,11 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
 
     /// A worker died for good (restart budget spent): show its fault.
     pub fn worker_fault(&mut self, f: WorkerFault) {
+        // A worker can die while idle: the fault must still show (and the tray
+        // keep it), so open the monitor's window for it first.
+        if self.session.is_none() && self.monitor.indicator() == Indicator::Hidden {
+            self.monitor.start(false);
+        }
         match f {
             WorkerFault::Listening(r) => self.monitor.platform_fault(r),
             WorkerFault::Typing(m) => self.typing_failed(m.to_string()),
@@ -263,6 +287,14 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             self.engine.reset();
             self.latched = false;
             return;
+        }
+        if let Some(g) = self.setup.as_mut() {
+            if !g.complete() {
+                g.open_settings();
+                self.engine.reset();
+                self.latched = false;
+                return;
+            }
         }
         if let Some(msg) = self.start_gate.check() {
             self.monitor.start(false);

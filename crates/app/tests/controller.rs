@@ -296,3 +296,30 @@ mod residency {
         assert!(res.loaded_model().is_none());
     }
 }
+
+#[test]
+fn a_key_press_before_setup_opens_settings_and_starts_nothing() {
+    let mut r = rig(vec![]);
+    let setup = FakeSetup::default();
+    setup.set_complete(false);
+    r.c.set_setup_gate(Box::new(setup.clone()));
+    r.press();
+    assert_eq!(setup.opened(), 1);
+    assert!(!r.cap.is_open());
+    assert_eq!(r.c.indicator(), Indicator::Hidden);
+    r.release();
+    setup.set_complete(true);
+    r.press();
+    assert!(r.cap.is_open(), "after setup the same key dictates");
+    assert_eq!(setup.opened(), 1);
+}
+
+#[test]
+fn a_changed_tap_threshold_and_key_kind_apply_to_the_next_press() {
+    let mut r = rig(vec![]);
+    r.c.set_lifecycle(LifecycleConfig { tap_threshold_ms: 1000, modifier_key: false });
+    r.press();
+    r.clock.advance(600);
+    r.release();
+    assert!(r.cap.is_open(), "600 ms is a tap under a 1000 ms threshold, so it went hands-free");
+}
