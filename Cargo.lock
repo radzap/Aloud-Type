@@ -68,6 +68,7 @@ dependencies = [
  "aloud-type-config",
  "aloud-type-core",
  "aloud-type-models",
+ "aloud-type-platform-windows",
  "iced",
  "tempfile",
  "ureq",

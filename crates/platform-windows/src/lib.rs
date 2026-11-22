@@ -1,5 +1,6 @@
 //! Windows platform adapters (keyboard hook, injection, audio, tray, overlay).
 pub mod audio;
+pub mod autostart;
 pub mod classify;
 pub mod hook_health;
 pub mod inject;
