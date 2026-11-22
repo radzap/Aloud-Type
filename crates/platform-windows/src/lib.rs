@@ -9,4 +9,7 @@ pub mod hook;
 pub mod instance;
 #[cfg(windows)]
 pub mod tray;
+#[cfg(windows)]
+pub mod overlay;
+pub mod overlay_model;
 pub mod tray_model;
