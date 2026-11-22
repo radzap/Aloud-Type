@@ -2,6 +2,7 @@
 pub mod lifecycle;
 pub mod listening;
 pub mod seams;
+pub mod streaming;
 pub mod testing;
 pub use seams::*;
 
