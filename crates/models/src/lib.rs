@@ -204,9 +204,10 @@ pub fn background_work(settings: &Settings, state: &State, dir: &Path) -> Backgr
     if !setup_complete(dir) {
         return BackgroundWork::default();
     }
+    // Confirmed: the model runs on a GPU, or a test approved one.
     let gpu_confirmed = settings.gpu != Gpu::CpuOnly
         && !state.gpu_disabled_after_error
-        && state.gpu_probes.values().any(|p| p.approved);
+        && (state.gpu_in_use.is_some() || state.gpu_probes.values().any(|p| p.approved));
     let small = find(GPU_DEFAULT_MODEL).expect("small model is in the catalog");
     BackgroundWork {
         vad: !is_installed(dir, &VAD_MODEL),
@@ -370,6 +371,14 @@ mod tests {
             st
         };
         assert!(!due(&Settings::default(), &unapproved));
+        let running_on_gpu = State {
+            gpu_in_use: Some("NVIDIA RTX".into()),
+            ..State::default()
+        };
+        assert!(
+            due(&Settings::default(), &running_on_gpu),
+            "a GPU in use confirms it"
+        );
         let cpu_only = Settings {
             gpu: Gpu::CpuOnly,
             ..Settings::default()

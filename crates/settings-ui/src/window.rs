@@ -38,6 +38,8 @@ enum Message {
     Download(&'static str),
     DownloadTick,
     Items(ItemsMsg),
+    /// Re-read GPU state while a GPU test runs or a GPU change reloads the model.
+    GpuTick,
 }
 
 struct App {
@@ -176,7 +178,16 @@ impl App {
                 };
                 self.apply(st);
             }
-            Message::Items(m) => self.items.update(m),
+            Message::Items(m) => {
+                if self.items.update(m) {
+                    return tick_after_millis(1000, Message::GpuTick);
+                }
+            }
+            Message::GpuTick => {
+                if self.items.poll_gpu() {
+                    return tick_after_millis(1000, Message::GpuTick);
+                }
+            }
             Message::CaptureTick => {
                 let now = self.now();
                 let st = self.session.tick(now);

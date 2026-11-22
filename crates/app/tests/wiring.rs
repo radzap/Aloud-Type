@@ -39,6 +39,9 @@ impl Targets for Log {
     fn request_model(&mut self, id: &str) {
         self.add(format!("model {id}"));
     }
+    fn reload_gpu(&mut self) {
+        self.add("reload gpu".into());
+    }
     fn retest_gpu(&mut self) {
         self.add("retest".into());
     }
@@ -134,6 +137,30 @@ fn changed_key_and_tap_threshold_are_applied_live() {
     }
     h.reload();
     assert_eq!(log.take(), vec!["keys [162, 32]", "life 400 false"]);
+}
+
+#[test]
+fn a_changed_gpu_choice_reloads_the_model_once() {
+    let (mut h, log, cur, _) = host(Settings::default());
+    h.reload();
+    assert!(
+        !log.take().iter().any(|l| l == "reload gpu"),
+        "not at start"
+    );
+    cur.borrow_mut().gpu = Gpu::CpuOnly;
+    h.reload();
+    assert_eq!(log.take(), vec!["reload gpu"]);
+    {
+        let mut s = cur.borrow_mut();
+        s.gpu = Gpu::Auto;
+        s.speech_model = "small-q5_1".into();
+    }
+    h.reload();
+    assert_eq!(
+        log.take(),
+        vec!["model small-q5_1"],
+        "the new model loads with the new GPU choice"
+    );
 }
 
 #[test]

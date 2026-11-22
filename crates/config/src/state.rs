@@ -16,8 +16,16 @@ pub struct State {
     pub first_run_complete: bool,
     /// Probe result keyed by "<device>|<driver>".
     pub gpu_probes: BTreeMap<String, GpuProbe>,
-    /// GPU disabled after a backend error during a Dictation.
+    /// GPU disabled after a backend error during a Dictation (or a GPU load that crashed).
     pub gpu_disabled_after_error: bool,
+    /// Display adapters installed on this machine (names), written by the resident process
+    /// so Settings can offer them without loading any GPU code.
+    pub gpu_adapters: Vec<String>,
+    /// The GPU the Speech model is running on; `None` when it runs on CPU.
+    pub gpu_in_use: Option<String>,
+    /// Set while the Speech model loads on a GPU. Still set at the next start means that load
+    /// crashed the process, so the GPU gets disabled.
+    pub gpu_load_pending: bool,
     /// The one-time switch to the Small model after a confirmed GPU was started.
     pub small_upgrade_started: bool,
     /// Partial download bytes per model id.
@@ -46,6 +54,9 @@ impl Schema for State {
             gpu_disabled_after_error: h::get_bool(doc, "gpu_disabled_after_error")?
                 .unwrap_or(false),
             small_upgrade_started: h::get_bool(doc, "small_upgrade_started")?.unwrap_or(false),
+            gpu_adapters: h::get_str_array(doc, "gpu_adapters")?.unwrap_or_default(),
+            gpu_in_use: h::get_str(doc, "gpu_in_use")?.filter(|s| !s.is_empty()),
+            gpu_load_pending: h::get_bool(doc, "gpu_load_pending")?.unwrap_or(false),
             ..Default::default()
         };
         if let Some(t) = doc.get("gpu_probes") {
@@ -85,6 +96,12 @@ impl Schema for State {
             self.gpu_disabled_after_error,
         );
         h::set_bool(doc, "small_upgrade_started", self.small_upgrade_started);
+        h::set_str_array(doc, "gpu_adapters", &self.gpu_adapters);
+        match &self.gpu_in_use {
+            Some(d) => h::set_str(doc, "gpu_in_use", d),
+            None => h::remove(doc, "gpu_in_use"),
+        }
+        h::set_bool(doc, "gpu_load_pending", self.gpu_load_pending);
         let t = h::table(doc, "gpu_probes");
         sync_keys(t, |k| self.gpu_probes.contains_key(k));
         for (k, p) in &self.gpu_probes {

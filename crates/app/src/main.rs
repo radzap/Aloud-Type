@@ -232,6 +232,7 @@ mod host {
         residency: Residency,
         tray: TrayHandle,
         state_path: PathBuf,
+        models_dir: PathBuf,
         lifecycle: Rc<Cell<Option<LifecycleConfig>>>,
     }
     impl Targets for Live {
@@ -263,8 +264,33 @@ mod host {
         fn request_model(&mut self, id: &str) {
             self.residency.request_model(id);
         }
+        fn reload_gpu(&mut self) {
+            aloud_type_recognizer::gpu::clear_error_on_disk(&self.state_path);
+            self.residency.reload();
+        }
         fn retest_gpu(&mut self) {
-            aloud_type_recognizer::gpu::retest_on_disk(&self.state_path);
+            use aloud_type_recognizer::gpu;
+            let (state_path, models_dir) = (self.state_path.clone(), self.models_dir.clone());
+            let residency = self.residency.clone();
+            // Seconds per GPU, each in a child process: off the Dictation thread.
+            std::thread::spawn(move || {
+                // The test measures the base q5_1 model (spec); else whatever model is installed.
+                let model = ["base-q5_1", "base.en-q5_1", "small-q5_1", "tiny.en-q5_1"]
+                    .iter()
+                    .filter_map(|id| aloud_type_models::find(id))
+                    .find_map(|i| aloud_type_models::verified_path(&models_dir, i).ok());
+                let Some(model) = model else { return };
+                let Ok(runner) = gpu::probe_runner(&model) else {
+                    return;
+                };
+                gpu::test_all_on_disk(
+                    &runner,
+                    &gpu::installed_adapters(),
+                    &state_path,
+                    gpu::PROBE_TIMEOUT,
+                );
+                residency.reload(); // Auto may now pick another device
+            });
         }
         fn notify(&mut self, text: &str) {
             self.tray.notify(text);
@@ -378,11 +404,7 @@ mod host {
                 let path =
                     aloud_type_models::verified_path(&dir, info).map_err(|e| format!("{e:?}"))?;
                 use aloud_type_recognizer::gpu;
-                // The probe benchmarks the base q5_1 model (spec); fall back to the model being loaded.
-                let probe_model = aloud_type_models::find("base-q5_1")
-                    .and_then(|i| aloud_type_models::verified_path(&dir, i).ok())
-                    .unwrap_or_else(|| path.clone());
-                let runner = gpu::probe_runner(&probe_model).map_err(|e| e.to_string())?;
+                // No speed test here (it only runs from Settings): loading stays fast.
                 let gpu_setting = ConfigFile::<Settings>::open(settings_path.clone())
                     .value()
                     .gpu
@@ -392,8 +414,6 @@ mod host {
                     &gpu_setting,
                     &state_path,
                     &gpu::installed_adapters(),
-                    &runner,
-                    gpu::PROBE_TIMEOUT,
                 );
                 Logger::new(StdFs, &log_dir, verbose).log(
                     clock.now(),
@@ -476,6 +496,7 @@ mod host {
             residency: residency.clone(),
             tray: tray.clone(),
             state_path: paths.state_file(),
+            models_dir: models_dir.clone(),
             lifecycle: lifecycle.clone(),
         };
         let source = {

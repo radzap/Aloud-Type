@@ -203,6 +203,18 @@ impl Residency {
         }
     }
 
+    /// Load the wanted model again because how it loads changed (the GPU choice or a GPU
+    /// test). The current model keeps serving until the new copy is ready; a load in flight is
+    /// restarted. An unloaded model picks up the change at its next load.
+    pub fn reload(&self) {
+        let mut st = self.lock();
+        if st.model.is_some() || st.loading.is_some() {
+            st.staged = None;
+            let id = st.wanted.clone();
+            self.begin_load(&mut st, &id);
+        }
+    }
+
     /// Notices to show the user (failed loads), drained.
     pub fn take_notices(&self) -> Vec<String> {
         std::mem::take(&mut self.lock().notices)
@@ -476,6 +488,34 @@ mod tests {
         eventually(|| !r.is_loading());
         r.tick();
         assert_eq!(said(&r), "small");
+    }
+
+    #[test]
+    fn a_reload_loads_the_same_model_again_while_the_current_copy_serves() {
+        let rig = Rig::new();
+        let r = rig.residency("base", ModelMemory::KeepLoaded);
+        eventually(|| r.loaded_model().is_some());
+        let gate = rig.hold("base");
+        r.reload();
+        eventually(|| rig.load_count() == 2);
+        assert!(r.is_loading());
+        assert_eq!(said(&r), "base", "the current copy keeps serving");
+        gate.open();
+        eventually(|| !r.is_loading());
+        r.tick();
+        assert_eq!(said(&r), "base");
+    }
+
+    #[test]
+    fn a_reload_while_unloaded_loads_nothing() {
+        let rig = Rig::new();
+        let r = rig.residency("base", ModelMemory::UnloadWhenIdle);
+        eventually(|| r.loaded_model().is_some());
+        rig.advance(IDLE_UNLOAD_MS + 1);
+        r.tick();
+        eventually(|| r.loaded_model().is_none());
+        r.reload();
+        assert_eq!(rig.load_count(), 1);
     }
 
     #[test]

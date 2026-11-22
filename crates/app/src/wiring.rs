@@ -56,6 +56,9 @@ pub trait Targets {
     fn set_placement(&mut self, v: VerticalPosition, h: HorizontalPosition);
     fn set_memory(&mut self, m: ModelMemory);
     fn request_model(&mut self, id: &str);
+    /// The GPU choice changed: load the current model again with it.
+    fn reload_gpu(&mut self);
+    /// Settings "Test": measure every GPU against the CPU (slow; runs in the background).
     fn retest_gpu(&mut self);
     /// A brief tray notice.
     fn notify(&mut self, text: &str);
@@ -123,8 +126,13 @@ impl<T: Targets> SettingsHost<T> {
         if old.map(|o| o.model_memory) != Some(new.model_memory) {
             self.targets.set_memory(new.model_memory);
         }
-        if old.map(|o| &o.speech_model) != Some(&new.speech_model) {
+        let model_changed = old.map(|o| &o.speech_model) != Some(&new.speech_model);
+        if model_changed {
             self.targets.request_model(&new.speech_model);
+        }
+        // A model change already loads with the new GPU choice.
+        if !model_changed && old.is_some_and(|o| o.gpu != new.gpu) {
+            self.targets.reload_gpu();
         }
         *self.current.borrow_mut() = dictation_settings(&new);
         self.applied = Some(new);

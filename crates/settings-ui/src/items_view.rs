@@ -64,7 +64,14 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
         self.session.reload();
     }
 
-    pub fn update(&mut self, m: ItemsMsg) {
+    /// Re-read the GPU state; true while the window should keep polling it.
+    pub fn poll_gpu(&mut self) -> bool {
+        self.session.poll_gpu()
+    }
+
+    /// Apply a change. True when it started GPU work worth watching (a test or a reload).
+    pub fn update(&mut self, m: ItemsMsg) -> bool {
+        let gpu_work = matches!(m, ItemsMsg::Gpu(_) | ItemsMsg::RetestGpu);
         match m {
             ItemsMsg::Gpu(c) => self.session.set_gpu(c.value),
             ItemsMsg::RetestGpu => self.session.retest_gpu(),
@@ -77,6 +84,7 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             ItemsMsg::Login(on) => self.session.set_launch_at_login(on),
             ItemsMsg::OpenLink(url) => open_link(url),
         }
+        gpu_work
     }
 
     /// The Microphone card.
@@ -182,27 +190,29 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             .map(|(value, label)| Choice { value, label })
             .collect();
         let gpu_sel = gpus.iter().find(|c| c.value == s.gpu).cloned();
-        let mut col = column![row![
+        let testing = self.session.gpu_testing();
+        let test = button(text(if testing { "Testing..." } else { "Test speed" }))
+            .style(button::secondary)
+            .on_press_maybe((!testing && self.session.has_gpus()).then_some(ItemsMsg::RetestGpu));
+        // GPU names are long: the GPU choice gets its own full-width row so its menu is too.
+        let mut col = column![
             labelled(
                 "Speech model memory",
                 pick_list(memories, mem_sel, ItemsMsg::Memory).width(Fill)
             ),
             labelled(
                 "GPU",
-                row![
-                    pick_list(gpus, gpu_sel, ItemsMsg::Gpu).width(Fill),
-                    button(text("Re-test"))
-                        .style(button::secondary)
-                        .on_press(ItemsMsg::RetestGpu)
-                ]
-                .spacing(6)
-                .align_y(Center)
+                row![pick_list(gpus, gpu_sel, ItemsMsg::Gpu).width(Fill), test]
+                    .spacing(6)
+                    .align_y(Center)
             ),
         ]
-        .spacing(10),]
-        .spacing(8);
+        .spacing(10);
         if let Some(n) = self.session.gpu_notice() {
             col = col.push(muted(n));
+        }
+        for line in self.session.gpu_status() {
+            col = col.push(muted(line));
         }
         card("Performance", col)
     }

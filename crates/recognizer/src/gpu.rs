@@ -131,9 +131,10 @@ pub fn record_verdict(state: &mut State, device: &GpuDevice, v: &Verdict) {
 /// A backend error happened during a Dictation: disable the GPU (recorded in state).
 pub fn record_gpu_error(state: &mut State) {
     state.gpu_disabled_after_error = true;
+    state.gpu_in_use = None;
 }
 
-/// Settings "re-test": forget the error flag and all saved results so the next start probes again.
+/// Settings "Test": forget the error flag and all saved results before probing again.
 pub fn request_retest(state: &mut State) {
     state.gpu_disabled_after_error = false;
     state.gpu_probes.clear();
@@ -145,21 +146,38 @@ pub enum CpuReason {
     Setting,
     DisabledAfterError,
     NoDevice,
-    /// Every candidate was probed and rejected.
+    /// Every device was tested and none was faster than the CPU.
     NotApproved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selection {
     Cpu(CpuReason),
-    /// Run on this approved device.
+    /// Run on this device.
     Gpu(GpuDevice),
-    /// These devices have no saved result for their current driver: run the probe child for them.
-    NeedsProbe(Vec<GpuDevice>),
 }
 
-/// Decide what the resident process does at model load, from settings, state and the installed
-/// devices. Pure: it never touches the GPU backend.
+/// Auto preference among untested GPUs: NVIDIA, then AMD, then any other.
+pub fn vendor_rank(name: &str) -> u8 {
+    let l = name.to_lowercase();
+    if ["nvidia", "geforce", "quadro"]
+        .iter()
+        .any(|v| l.contains(v))
+    {
+        0
+    } else if ["amd", "radeon"].iter().any(|v| l.contains(v)) {
+        1
+    } else {
+        2
+    }
+}
+
+/// Decide what the resident process loads the model on, from settings, state and the
+/// installed devices. Pure: it never touches the GPU backend and never runs a test.
+///
+/// - A device chosen in Settings is used when installed, whatever a test said.
+/// - Auto uses the first device by [`vendor_rank`] (NVIDIA, AMD, others), skipping devices a
+///   test rejected on their current driver.
 pub fn select(setting: &Gpu, state: &State, installed: &[GpuDevice]) -> Selection {
     if *setting == Gpu::CpuOnly {
         return Selection::Cpu(CpuReason::Setting);
@@ -167,39 +185,25 @@ pub fn select(setting: &Gpu, state: &State, installed: &[GpuDevice]) -> Selectio
     if state.gpu_disabled_after_error {
         return Selection::Cpu(CpuReason::DisabledAfterError);
     }
-    let candidates: Vec<&GpuDevice> = installed
-        .iter()
-        .filter(|d| match setting {
-            Gpu::Device(name) => &d.name == name,
-            _ => true,
-        })
-        .collect();
-    if candidates.is_empty() {
+    if let Gpu::Device(name) = setting {
+        return installed
+            .iter()
+            .find(|d| &d.name == name)
+            .map(|d| Selection::Gpu(d.clone()))
+            .unwrap_or(Selection::Cpu(CpuReason::NoDevice));
+    }
+    if installed.is_empty() {
         return Selection::Cpu(CpuReason::NoDevice);
     }
-    let best = candidates
+    // A test only rules devices out: one short measurement is too noisy to rank an iGPU
+    // against a discrete GPU (runs on one laptop gave 4x-13x for the same GPU).
+    let usable = |d: &&GpuDevice| state.gpu_probes.get(&d.key()).is_none_or(|p| p.approved);
+    installed
         .iter()
-        .filter_map(|d| {
-            state
-                .gpu_probes
-                .get(&d.key())
-                .filter(|p| p.approved)
-                .map(|p| (*d, p.speedup))
-        })
-        .max_by(|a, b| a.1.total_cmp(&b.1));
-    if let Some((d, _)) = best {
-        return Selection::Gpu(d.clone());
-    }
-    let unprobed: Vec<GpuDevice> = candidates
-        .into_iter()
-        .filter(|d| !state.gpu_probes.contains_key(&d.key()))
-        .cloned()
-        .collect();
-    if unprobed.is_empty() {
-        Selection::Cpu(CpuReason::NotApproved)
-    } else {
-        Selection::NeedsProbe(unprobed)
-    }
+        .filter(usable)
+        .min_by_key(|d| vendor_rank(&d.name))
+        .map(|d| Selection::Gpu(d.clone()))
+        .unwrap_or(Selection::Cpu(CpuReason::NotApproved))
 }
 
 // ---- child-process isolation ----
@@ -544,11 +548,14 @@ pub const DISPLAY_CLASS_KEY: &str =
     r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
 
 /// Installed display adapters, via `reg.exe` (Windows only; empty elsewhere or on failure).
+/// Takes a fraction of a second; it runs at every model load.
 pub fn installed_adapters() -> Vec<GpuDevice> {
     #[cfg(windows)]
     {
         let out = Command::new("reg")
-            .args(["query", DISPLAY_CLASS_KEY, "/s"])
+            // Only values whose name contains "Driver": the full subtree dump is megabytes of
+            // driver data and took over a minute on an NVIDIA machine.
+            .args(["query", DISPLAY_CLASS_KEY, "/s", "/v", "/f", "Driver"])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output();
@@ -720,39 +727,64 @@ fn update_state(path: &Path, f: impl FnOnce(&mut State)) {
     }
 }
 
-/// Settings "re-test" on the resident side: clear the error flag and saved results on disk.
-pub fn retest_on_disk(state_path: &Path) {
-    update_state(state_path, request_retest);
+/// Settings changed the GPU choice: the user asked for the GPU again, so forget an earlier error.
+pub fn clear_error_on_disk(state_path: &Path) {
+    update_state(state_path, |st| st.gpu_disabled_after_error = false);
 }
 
-/// Open the recognizer for the resident process: select from settings and saved state, run the
-/// probe child for devices without a result for their current driver, save results, and load the
-/// GPU backend only for an approved device. A later backend error is saved to the state file.
+/// Settings "Test": clear the error flag and saved results, then probe every adapter in a
+/// child process and save each verdict. Slow (seconds per device): run it off the
+/// Dictation thread, then reload the model so Auto can use the results.
+pub fn test_all_on_disk(
+    runner: &dyn ChildRunner,
+    adapters: &[GpuDevice],
+    state_path: &Path,
+    timeout: Duration,
+) {
+    update_state(state_path, request_retest);
+    for d in adapters {
+        let v = probe_in_child(runner, d, timeout);
+        update_state(state_path, |st| record_verdict(st, d, &v));
+    }
+}
+
+/// Open the recognizer for the resident process: no test runs here. The adapter list is saved
+/// for Settings, the device comes from [`select`], and only a selected device loads the GPU
+/// backend. A GPU load that crashed the process (marker still set at the next start) disables
+/// the GPU; a later backend error is saved the same way.
 pub fn open_for_host(
     backend: Box<dyn GpuBackend>,
     setting: &Gpu,
     state_path: &Path,
     adapters: &[GpuDevice],
-    runner: &dyn ChildRunner,
-    probe_timeout: Duration,
 ) -> GpuFallback {
-    let mut state = ConfigFile::<State>::open(state_path).value().clone();
-    let mut selection = select(setting, &state, adapters);
-    if let Selection::NeedsProbe(devices) = &selection {
-        let devices = devices.clone();
-        update_state(state_path, |st| {
-            for d in &devices {
-                let v = probe_in_child(runner, d, probe_timeout);
-                record_verdict(st, d, &v);
-            }
-        });
-        state = ConfigFile::<State>::open(state_path).value().clone();
-        selection = select(setting, &state, adapters);
+    let mut names: Vec<String> = adapters.iter().map(|d| d.name.clone()).collect();
+    names.dedup();
+    update_state(state_path, |st| {
+        if st.gpu_load_pending {
+            st.gpu_load_pending = false;
+            record_gpu_error(st);
+        }
+        st.gpu_adapters = names;
+    });
+    let state = ConfigFile::<State>::open(state_path).value().clone();
+    let selection = select(setting, &state, adapters);
+    if matches!(selection, Selection::Gpu(_)) {
+        update_state(state_path, |st| st.gpu_load_pending = true);
     }
     let path = state_path.to_path_buf();
-    open_recognizer(
+    let r = open_recognizer(
         backend,
         &selection,
         Box::new(move |_| update_state(&path, record_gpu_error)),
-    )
+    );
+    let in_use = match (&selection, r.using_gpu()) {
+        (Selection::Gpu(d), true) => Some(d.name.clone()),
+        _ => None,
+    };
+    update_state(state_path, |st| {
+        st.gpu_load_pending = false;
+        st.gpu_in_use = in_use;
+    });
+    r
 }

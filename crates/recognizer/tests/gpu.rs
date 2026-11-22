@@ -177,13 +177,76 @@ fn a_saved_approval_for_the_same_device_and_driver_is_reused_without_a_new_probe
 }
 
 #[test]
-fn a_new_driver_version_is_probed_again() {
+fn a_rejection_on_an_old_driver_does_not_hold_back_the_new_driver() {
     let mut st = State::default();
-    record_verdict(&mut st, &dev("Radeon 780M", "31.0.1"), &ok_verdict());
+    let old = dev("Radeon 780M", "31.0.1");
+    record_verdict(
+        &mut st,
+        &old,
+        &Verdict {
+            approved: false,
+            speedup: 0.9,
+            reason: "slow".into(),
+        },
+    );
     let upgraded = dev("Radeon 780M", "32.0.0");
     assert_eq!(
         select(&Gpu::Auto, &st, std::slice::from_ref(&upgraded)),
-        Selection::NeedsProbe(vec![upgraded])
+        Selection::Gpu(upgraded)
+    );
+}
+
+#[test]
+fn without_a_test_auto_prefers_nvidia_then_amd_then_any_gpu() {
+    let intel = dev("Intel(R) Iris(R) Xe Graphics", "1");
+    let amd = dev("AMD Radeon(TM) 780M Graphics", "2");
+    let nvidia = dev("NVIDIA GeForce RTX 3060 Laptop GPU", "3");
+    let st = State::default();
+    assert_eq!(
+        select(
+            &Gpu::Auto,
+            &st,
+            &[intel.clone(), amd.clone(), nvidia.clone()]
+        ),
+        Selection::Gpu(nvidia)
+    );
+    assert_eq!(
+        select(&Gpu::Auto, &st, &[intel.clone(), amd.clone()]),
+        Selection::Gpu(amd)
+    );
+    assert_eq!(
+        select(&Gpu::Auto, &st, std::slice::from_ref(&intel)),
+        Selection::Gpu(intel)
+    );
+}
+
+#[test]
+fn a_device_a_test_rejected_is_skipped_unless_picked_by_name() {
+    let intel = dev("Intel(R) Iris(R) Xe Graphics", "1");
+    let nvidia = dev("NVIDIA GeForce RTX 3060", "3");
+    let mut st = State::default();
+    record_verdict(&mut st, &intel, &ok_verdict());
+    record_verdict(
+        &mut st,
+        &nvidia,
+        &Verdict {
+            approved: false,
+            speedup: 0.0,
+            reason: "crashed".into(),
+        },
+    );
+    assert_eq!(
+        select(&Gpu::Auto, &st, &[intel.clone(), nvidia.clone()]),
+        Selection::Gpu(intel)
+    );
+    // A device picked by name is used even when a test rejected it.
+    assert_eq!(
+        select(
+            &Gpu::Device(nvidia.name.clone()),
+            &st,
+            std::slice::from_ref(&nvidia)
+        ),
+        Selection::Gpu(nvidia)
     );
 }
 
@@ -234,12 +297,12 @@ fn a_gpu_disabled_after_an_error_stays_on_cpu_until_retested() {
         select(&Gpu::Auto, &st, std::slice::from_ref(&d)),
         Selection::Cpu(CpuReason::DisabledAfterError)
     );
-    // Re-test from Settings clears the flag and the saved results, so the next start probes again.
+    // Test from Settings clears the flag and the saved results.
     request_retest(&mut st);
     assert!(!st.gpu_disabled_after_error);
     assert_eq!(
         select(&Gpu::Auto, &st, std::slice::from_ref(&d)),
-        Selection::NeedsProbe(vec![d])
+        Selection::Gpu(d)
     );
 }
 
@@ -265,29 +328,26 @@ fn a_specific_device_setting_uses_only_that_device() {
 }
 
 #[test]
-fn auto_picks_the_fastest_approved_device() {
+fn auto_keeps_the_vendor_order_among_approved_devices_whatever_the_measured_speed() {
+    // A short test is noisy: an iGPU once measured faster than the RTX on the same laptop.
     let mut st = State::default();
-    let a = dev("Intel UHD", "1");
-    let b = dev("NVIDIA RTX", "2");
-    record_verdict(
-        &mut st,
-        &a,
-        &Verdict {
-            approved: true,
-            speedup: 1.5,
-            reason: String::new(),
-        },
+    let intel = dev("Intel(R) Iris(R) Xe Graphics", "1");
+    let nvidia = dev("NVIDIA GeForce RTX 3060", "2");
+    for (d, speedup) in [(&intel, 6.8), (&nvidia, 6.4)] {
+        record_verdict(
+            &mut st,
+            d,
+            &Verdict {
+                approved: true,
+                speedup,
+                reason: String::new(),
+            },
+        );
+    }
+    assert_eq!(
+        select(&Gpu::Auto, &st, &[intel, nvidia.clone()]),
+        Selection::Gpu(nvidia)
     );
-    record_verdict(
-        &mut st,
-        &b,
-        &Verdict {
-            approved: true,
-            speedup: 6.0,
-            reason: String::new(),
-        },
-    );
-    assert_eq!(select(&Gpu::Auto, &st, &[a, b.clone()]), Selection::Gpu(b));
 }
 
 // ---- child-process isolation ----
@@ -500,7 +560,6 @@ fn with_the_gpu_unapproved_the_backend_library_is_never_loaded() {
         Selection::Cpu(CpuReason::NotApproved),
         Selection::Cpu(CpuReason::DisabledAfterError),
         Selection::Cpu(CpuReason::NoDevice),
-        Selection::NeedsProbe(vec![dev("RTX", "5")]),
     ] {
         let (b, c) = FakeBackend::new();
         let mut r = open_recognizer(Box::new(b), &sel, Box::new(|_| {}));
@@ -672,65 +731,87 @@ impl ChildRunner for CountingRunner {
     }
 }
 
-#[test]
-fn the_host_probes_once_saves_the_result_and_reuses_it_on_the_next_start() {
-    let dir = tempfile::tempdir().unwrap();
-    let sp = dir.path().join("state.toml");
-    let adapters = [dev("RTX", "5")];
-    let runner = CountingRunner(RefCell::new(0), ok_verdict());
-
-    let (b, c) = FakeBackend::new();
-    let mut r = open_for_host(
-        Box::new(b),
-        &Gpu::Auto,
-        &sp,
-        &adapters,
-        &runner,
-        Duration::from_secs(5),
-    );
-    assert!(r.using_gpu());
-    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "gpu words");
-    assert_eq!(*runner.0.borrow(), 1);
-    assert_eq!(c.library_loads.load(SeqCst), 1);
-
-    // Next start: result is on disk, no second probe.
-    let (b, _c) = FakeBackend::new();
-    let r = open_for_host(
-        Box::new(b),
-        &Gpu::Auto,
-        &sp,
-        &adapters,
-        &runner,
-        Duration::from_secs(5),
-    );
-    assert!(r.using_gpu());
-    assert_eq!(*runner.0.borrow(), 1);
+fn read_state(sp: &std::path::Path) -> State {
+    aloud_type_config::ConfigFile::<State>::open(sp)
+        .value()
+        .clone()
 }
 
 #[test]
-fn a_rejected_probe_keeps_the_host_on_cpu_and_never_loads_the_backend() {
+fn the_host_loads_on_the_preferred_gpu_without_a_test_and_records_it() {
     let dir = tempfile::tempdir().unwrap();
     let sp = dir.path().join("state.toml");
-    let runner = CountingRunner(
-        RefCell::new(0),
-        Verdict {
-            approved: false,
-            speedup: 0.9,
-            reason: "slow".into(),
-        },
-    );
+    let adapters = [dev("Intel UHD", "1"), dev("NVIDIA RTX", "2")];
     let (b, c) = FakeBackend::new();
-    let mut r = open_for_host(
-        Box::new(b),
-        &Gpu::Auto,
-        &sp,
-        &[dev("UHD", "1")],
-        &runner,
-        Duration::from_secs(5),
-    );
+    let mut r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters);
+    assert!(r.using_gpu());
+    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "gpu words");
+    assert_eq!(c.library_loads.load(SeqCst), 1);
+    let st = read_state(&sp);
+    assert!(st.gpu_probes.is_empty(), "no test at start");
+    assert_eq!(st.gpu_adapters, ["Intel UHD", "NVIDIA RTX"]);
+    assert_eq!(st.gpu_in_use.as_deref(), Some("NVIDIA RTX"));
+    assert!(!st.gpu_load_pending);
+}
+
+#[test]
+fn on_cpu_the_host_records_no_gpu_in_use_and_never_loads_the_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    let (b, c) = FakeBackend::new();
+    let r = open_for_host(Box::new(b), &Gpu::CpuOnly, &sp, &[dev("RTX", "5")]);
     assert!(!r.using_gpu());
-    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
     assert_eq!(c.library_loads.load(SeqCst), 0);
+    assert_eq!(read_state(&sp).gpu_in_use, None);
+}
+
+#[test]
+fn a_gpu_load_that_crashed_the_process_disables_the_gpu_at_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    // The previous start set the marker and never cleared it.
+    aloud_type_config::ConfigFile::<State>::open(&sp)
+        .update(|s| s.gpu_load_pending = true)
+        .unwrap();
+    let (b, c) = FakeBackend::new();
+    let r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &[dev("RTX", "5")]);
+    assert!(!r.using_gpu());
+    assert_eq!(c.library_loads.load(SeqCst), 0);
+    let st = read_state(&sp);
+    assert!(st.gpu_disabled_after_error);
+    assert!(!st.gpu_load_pending);
+    // Picking the GPU again in Settings clears the error.
+    clear_error_on_disk(&sp);
+    let (b, _c) = FakeBackend::new();
+    assert!(open_for_host(Box::new(b), &Gpu::Auto, &sp, &[dev("RTX", "5")]).using_gpu());
+}
+
+#[test]
+fn the_settings_test_probes_every_adapter_and_saves_each_verdict() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    aloud_type_config::ConfigFile::<State>::open(&sp)
+        .update(|s| {
+            s.gpu_disabled_after_error = true;
+            s.gpu_probes.insert(
+                "Old|1".into(),
+                aloud_type_config::GpuProbe {
+                    approved: true,
+                    speedup: 9.0,
+                },
+            );
+        })
+        .unwrap();
+    let runner = CountingRunner(RefCell::new(0), ok_verdict());
+    let adapters = [dev("Intel UHD", "1"), dev("NVIDIA RTX", "2")];
+    test_all_on_disk(&runner, &adapters, &sp, Duration::from_secs(5));
+    assert_eq!(*runner.0.borrow(), 2);
+    let st = read_state(&sp);
+    assert!(!st.gpu_disabled_after_error);
+    assert_eq!(
+        st.gpu_probes.keys().cloned().collect::<Vec<_>>(),
+        ["Intel UHD|1", "NVIDIA RTX|2"]
+    );
 }
 
 #[test]
@@ -738,41 +819,17 @@ fn a_mid_dictation_gpu_error_is_recorded_in_the_state_file_and_survives_restart(
     let dir = tempfile::tempdir().unwrap();
     let sp = dir.path().join("state.toml");
     let adapters = [dev("RTX", "5")];
-    let runner = CountingRunner(RefCell::new(0), ok_verdict());
     let (mut b, _c) = FakeBackend::new();
     b.gpu_fail_after = Some(0);
-    let mut r = open_for_host(
-        Box::new(b),
-        &Gpu::Auto,
-        &sp,
-        &adapters,
-        &runner,
-        Duration::from_secs(5),
-    );
+    let mut r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters);
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
-    assert!(
-        aloud_type_config::ConfigFile::<State>::open(&sp)
-            .value()
-            .gpu_disabled_after_error
-    );
+    let st = read_state(&sp);
+    assert!(st.gpu_disabled_after_error);
+    assert_eq!(st.gpu_in_use, None);
     let (b, c) = FakeBackend::new();
-    let r = open_for_host(
-        Box::new(b),
-        &Gpu::Auto,
-        &sp,
-        &adapters,
-        &runner,
-        Duration::from_secs(5),
-    );
+    let r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters);
     assert!(!r.using_gpu());
     assert_eq!(c.library_loads.load(SeqCst), 0);
-    // Re-test clears it on disk.
-    retest_on_disk(&sp);
-    assert!(
-        !aloud_type_config::ConfigFile::<State>::open(&sp)
-            .value()
-            .gpu_disabled_after_error
-    );
 }
 
 #[test]

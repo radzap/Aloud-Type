@@ -303,6 +303,34 @@ fn state_round_trips_and_updates_merge_with_other_writers() {
 }
 
 #[test]
+fn state_keeps_the_adapter_list_the_gpu_in_use_and_the_load_marker() {
+    let d = dir();
+    let p = d.path().join("state.toml");
+    let mut f = ConfigFile::<State>::open(&p);
+    f.update(|s| {
+        s.gpu_adapters = vec![
+            "NVIDIA GeForce RTX 3060".into(),
+            "Intel(R) Iris(R) Xe".into(),
+        ];
+        s.gpu_in_use = Some("NVIDIA GeForce RTX 3060".into());
+        s.gpu_load_pending = true;
+    })
+    .unwrap();
+    let s = ConfigFile::<State>::open(&p).value().clone();
+    assert_eq!(s.gpu_adapters.len(), 2);
+    assert_eq!(s.gpu_in_use.as_deref(), Some("NVIDIA GeForce RTX 3060"));
+    assert!(s.gpu_load_pending);
+    f.update(|s| {
+        s.gpu_in_use = None;
+        s.gpu_load_pending = false;
+    })
+    .unwrap();
+    let s = ConfigFile::<State>::open(&p).value().clone();
+    assert_eq!(s.gpu_in_use, None);
+    assert!(!s.gpu_load_pending);
+}
+
+#[test]
 fn app_paths_live_under_local_app_data() {
     let a = AppPaths::under(Path::new("C:/Users/u/AppData/Local"));
     assert!(a.settings_file().ends_with("AloudType/settings.toml"));

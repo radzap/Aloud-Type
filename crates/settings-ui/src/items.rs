@@ -8,6 +8,25 @@ use aloud_type_config::{
     VerticalPosition,
 };
 use std::io;
+use std::time::{Duration, Instant};
+
+/// How long Settings watches the state file after a GPU change (the model reloads meanwhile).
+const GPU_WATCH: Duration = Duration::from_secs(60);
+/// Give up waiting for a GPU test after this long (each device may take up to the probe timeout).
+const GPU_TEST_LIMIT: Duration = Duration::from_secs(300);
+
+/// An adapter name as shown in Settings: without the "(R)" and "(TM)" marks.
+pub fn gpu_label(name: &str) -> String {
+    let mut s = name.to_string();
+    for m in ["(R)", "(r)", "(TM)", "(tm)", "(C)"] {
+        s = s.replace(m, "");
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn probe_device(key: &str) -> &str {
+    key.split('|').next().unwrap_or(key)
+}
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_URL: &str = "https://github.com/radzap/Aloud-Type/releases";
@@ -152,6 +171,12 @@ pub struct ItemsSession<T: Transport, L: LoginItem, M: MicLister> {
     /// Machine state (GPU probe results), read-only here; the resident process writes it.
     state: Option<ConfigFile<State>>,
     error: Option<String>,
+    /// A GPU test is running in the resident process until this time at the latest.
+    gpu_test_until: Option<Instant>,
+    /// Keep re-reading the state file until then (a GPU change reloads the model).
+    gpu_watch_until: Option<Instant>,
+    /// The resident process could not be reached for a GPU test.
+    gpu_test_unreachable: bool,
 }
 
 impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
@@ -163,6 +188,9 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
             mics,
             state: None,
             error: None,
+            gpu_test_until: None,
+            gpu_watch_until: None,
+            gpu_test_unreachable: false,
         }
     }
 
@@ -172,47 +200,129 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
         self
     }
 
-    /// Auto, CPU only, then every device a probe has seen (names from the state file).
+    /// Auto, CPU only, then every installed GPU (the resident process saves the list), any
+    /// device a test has seen, and the saved choice even if it is gone.
     pub fn gpu_options(&self) -> Vec<(Gpu, String)> {
         let mut out = vec![
             (Gpu::Auto, "Auto".to_string()),
             (Gpu::CpuOnly, "CPU only".to_string()),
         ];
-        let mut names: Vec<String> = self
-            .state
-            .as_ref()
-            .map(|s| {
-                s.value()
-                    .gpu_probes
-                    .keys()
-                    .map(|k| k.split('|').next().unwrap_or(k).to_string())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let mut names: Vec<String> = Vec::new();
+        if let Some(st) = &self.state {
+            let st = st.value();
+            names.extend(st.gpu_adapters.iter().cloned());
+            names.extend(st.gpu_probes.keys().map(|k| probe_device(k).to_string()));
+        }
         if let Gpu::Device(d) = &self.config.value().gpu {
             names.push(d.clone());
         }
-        names.sort();
-        names.dedup();
-        out.extend(names.into_iter().map(|n| (Gpu::Device(n.clone()), n)));
+        let mut seen = std::collections::HashSet::new();
+        names.retain(|n| seen.insert(n.clone()));
+        out.extend(names.into_iter().map(|n| {
+            let label = gpu_label(&n);
+            (Gpu::Device(n), label)
+        }));
         out
     }
 
     pub fn set_gpu(&mut self, gpu: Gpu) {
         self.save(|s| s.gpu = gpu);
+        self.gpu_watch_until = Some(Instant::now() + GPU_WATCH);
     }
 
-    /// Shown in Settings when a backend error switched the GPU off for the session.
+    /// Shown in Settings when a backend error switched the GPU off.
     pub fn gpu_notice(&self) -> Option<&'static str> {
         let st = self.state.as_ref()?;
         st.value()
             .gpu_disabled_after_error
-            .then_some("GPU disabled after an error")
+            .then_some("GPU disabled after an error. Pick a GPU or press Test to try again.")
     }
 
-    /// Re-test: the resident process forgets the error and saved results and probes again.
+    /// Any GPU to test.
+    pub fn has_gpus(&self) -> bool {
+        self.state
+            .as_ref()
+            .is_some_and(|s| !s.value().gpu_adapters.is_empty())
+    }
+
+    pub fn gpu_testing(&self) -> bool {
+        self.gpu_test_until.is_some()
+    }
+
+    /// Lines under the GPU choice: what the model runs on and the last test's results.
+    pub fn gpu_status(&self) -> Vec<String> {
+        if self.gpu_testing() {
+            return vec![
+                "Testing each GPU against the CPU. This takes a few seconds per GPU.".into(),
+            ];
+        }
+        let mut out = Vec::new();
+        if self.gpu_test_unreachable {
+            out.push("Aloud Type is not running, so the GPUs could not be tested.".into());
+        }
+        let Some(st) = &self.state else { return out };
+        let st = st.value();
+        out.push(match &st.gpu_in_use {
+            Some(d) => format!("Running on {}", gpu_label(d)),
+            None => "Running on the CPU".into(),
+        });
+        for (key, p) in &st.gpu_probes {
+            let name = gpu_label(probe_device(key));
+            out.push(if p.approved {
+                format!("Test: {name} is {:.1}x faster than the CPU", p.speedup)
+            } else if p.speedup > 0.0 {
+                format!("Test: {name} not used ({:.1}x the CPU speed)", p.speedup)
+            } else {
+                format!("Test: {name} failed")
+            });
+        }
+        out
+    }
+
+    /// Settings "Test": clear old results, ask the resident process to measure every GPU,
+    /// and watch the state file for the results ([`Self::poll_gpu`]).
     pub fn retest_gpu(&mut self) {
-        self.link.send(Command::RetestGpu);
+        if let Some(st) = self.state.as_mut() {
+            let _ = st.update(|x| {
+                x.gpu_probes.clear();
+                x.gpu_disabled_after_error = false;
+            });
+        }
+        self.gpu_test_unreachable = !self.link.send(Command::RetestGpu);
+        if !self.gpu_test_unreachable {
+            self.gpu_test_until = Some(Instant::now() + GPU_TEST_LIMIT);
+        }
+    }
+
+    /// Re-read the state file. True while a test runs or a GPU change is still settling, so
+    /// the window keeps polling.
+    pub fn poll_gpu(&mut self) -> bool {
+        self.poll_gpu_at(Instant::now())
+    }
+
+    fn poll_gpu_at(&mut self, now: Instant) -> bool {
+        if let Some(st) = self.state.as_mut() {
+            st.reload();
+        }
+        if let Some(until) = self.gpu_test_until {
+            let done = self.state.as_ref().is_some_and(|st| {
+                let st = st.value();
+                !st.gpu_adapters.is_empty()
+                    && st
+                        .gpu_adapters
+                        .iter()
+                        .all(|a| st.gpu_probes.keys().any(|k| probe_device(k) == a.as_str()))
+            });
+            if done || now >= until {
+                self.gpu_test_until = None;
+                // The resident process now reloads the model with the results.
+                self.gpu_watch_until = Some(now + GPU_WATCH);
+            }
+        }
+        if self.gpu_watch_until.is_some_and(|u| now >= u) {
+            self.gpu_watch_until = None;
+        }
+        self.gpu_test_until.is_some() || self.gpu_watch_until.is_some()
     }
 
     pub fn settings(&self) -> &Settings {
@@ -495,29 +605,112 @@ mod tests {
     }
 
     #[test]
-    fn gpu_choices_error_notice_and_retest() {
-        let (s, fake, d, p) = session(Login::default());
+    fn gpu_choices_come_from_the_installed_adapters_with_readable_names() {
+        let (s, _fake, d, p) = session(Login::default());
+        let sp = d.path().join("state.toml");
+        ConfigFile::<State>::open(&sp)
+            .update(|x| {
+                x.gpu_adapters = vec![
+                    "Intel(R) Iris(R) Xe Graphics".into(),
+                    "NVIDIA GeForce RTX 3060 Laptop GPU".into(),
+                ];
+                x.gpu_in_use = Some("NVIDIA GeForce RTX 3060 Laptop GPU".into());
+            })
+            .unwrap();
+        let mut s = s.with_state(ConfigFile::open(&sp));
+        let opts = s.gpu_options();
+        let labels: Vec<_> = opts.iter().map(|o| o.1.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Auto",
+                "CPU only",
+                "Intel Iris Xe Graphics",
+                "NVIDIA GeForce RTX 3060 Laptop GPU"
+            ]
+        );
+        // The saved value is the exact adapter name, not the label.
+        s.set_gpu(opts[2].0.clone());
+        assert_eq!(
+            reread(&p).gpu,
+            Gpu::Device("Intel(R) Iris(R) Xe Graphics".into())
+        );
+        assert_eq!(
+            s.gpu_status(),
+            ["Running on NVIDIA GeForce RTX 3060 Laptop GPU"]
+        );
+    }
+
+    #[test]
+    fn gpu_error_notice_and_test_results() {
+        let (s, fake, d, _p) = session(Login::default());
         let sp = d.path().join("state.toml");
         let mut st = ConfigFile::<State>::open(&sp);
+        st.update(|x| {
+            x.gpu_adapters = vec!["RTX 4060".into(), "UHD 620".into()];
+            x.gpu_disabled_after_error = true;
+        })
+        .unwrap();
+        let mut s = s.with_state(ConfigFile::open(&sp));
+        assert!(s
+            .gpu_notice()
+            .unwrap()
+            .starts_with("GPU disabled after an error"));
+        assert!(s.has_gpus());
+
+        s.retest_gpu();
+        assert_eq!(fake.log.borrow().last().unwrap(), "retest-gpu");
+        assert!(s.gpu_testing());
+        assert!(s.gpu_notice().is_none(), "the test clears the error");
+        let t0 = Instant::now();
+        assert!(s.poll_gpu_at(t0), "no results yet");
+
+        // The resident process saves one verdict per adapter.
         st.update(|x| {
             x.gpu_probes.insert(
                 "RTX 4060|31.0.1".into(),
                 aloud_type_config::GpuProbe {
                     approved: true,
-                    speedup: 3.0,
+                    speedup: 3.04,
                 },
             );
-            x.gpu_disabled_after_error = true;
+            x.gpu_probes.insert(
+                "UHD 620|27.0".into(),
+                aloud_type_config::GpuProbe {
+                    approved: false,
+                    speedup: 0.8,
+                },
+            );
         })
         .unwrap();
-        let mut s = s.with_state(ConfigFile::open(&sp));
-        let labels: Vec<_> = s.gpu_options().into_iter().map(|o| o.1).collect();
-        assert_eq!(labels, ["Auto", "CPU only", "RTX 4060"]);
-        assert_eq!(s.gpu_notice(), Some("GPU disabled after an error"));
-        s.set_gpu(Gpu::Device("RTX 4060".into()));
-        assert_eq!(reread(&p).gpu, Gpu::Device("RTX 4060".into()));
+        assert!(s.poll_gpu_at(t0), "done testing; still watching the reload");
+        assert!(!s.gpu_testing());
+        assert_eq!(
+            s.gpu_status(),
+            [
+                "Running on the CPU",
+                "Test: RTX 4060 is 3.0x faster than the CPU",
+                "Test: UHD 620 not used (0.8x the CPU speed)"
+            ]
+        );
+        assert!(!s.poll_gpu_at(t0 + GPU_WATCH), "stops watching");
+    }
+
+    #[test]
+    fn a_test_without_a_resident_process_says_so() {
+        struct Down;
+        impl Transport for Down {
+            fn request(&mut self, _: &str) -> io::Result<String> {
+                Err(io::ErrorKind::NotFound.into())
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("settings.toml");
+        let mut s = ItemsSession::new(ConfigFile::open(&p), Down, Login::default(), Mics(vec![]))
+            .with_state(ConfigFile::open(d.path().join("state.toml")));
         s.retest_gpu();
-        assert_eq!(fake.log.borrow().last().unwrap(), "retest-gpu");
+        assert!(!s.gpu_testing());
+        assert!(s.gpu_status()[0].contains("not running"));
     }
 
     #[test]
