@@ -10,7 +10,10 @@ pub mod hook;
 #[cfg(windows)]
 pub mod instance;
 #[cfg(windows)]
+pub mod pipe_server;
+#[cfg(windows)]
 pub mod power_win;
 #[cfg(windows)]
 pub mod tray;
+pub mod settings_launcher;
 pub mod tray_model;

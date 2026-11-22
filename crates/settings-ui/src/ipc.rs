@@ -4,32 +4,7 @@
 //! the pipe closes while suspended (Settings may be killed mid-capture).
 use std::io::{self, BufRead, BufReader, Write};
 
-pub const PIPE_NAME: &str = r"\\.\pipe\AloudType";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Command {
-    SuspendKeys,
-    ResumeKeys,
-    ReloadSettings,
-}
-
-impl Command {
-    pub fn encode(self) -> &'static str {
-        match self {
-            Command::SuspendKeys => "suspend-keys",
-            Command::ResumeKeys => "resume-keys",
-            Command::ReloadSettings => "reload-settings",
-        }
-    }
-    pub fn decode(line: &str) -> Option<Self> {
-        match line.trim() {
-            "suspend-keys" => Some(Command::SuspendKeys),
-            "resume-keys" => Some(Command::ResumeKeys),
-            "reload-settings" => Some(Command::ReloadSettings),
-            _ => None,
-        }
-    }
-}
+pub use aloud_type_core::ipc::{Command, PIPE_NAME};
 
 /// A connection (or the lack of one) to the resident process.
 pub trait Transport {
@@ -85,14 +60,6 @@ impl Transport for PipeClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn commands_round_trip() {
-        for c in [Command::SuspendKeys, Command::ResumeKeys, Command::ReloadSettings] {
-            assert_eq!(Command::decode(c.encode()), Some(c));
-        }
-        assert_eq!(Command::decode("bogus"), None);
-    }
 
     #[test]
     fn missing_pipe_is_reported_as_not_acknowledged_not_as_a_panic() {

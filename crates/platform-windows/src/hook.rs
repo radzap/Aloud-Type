@@ -158,6 +158,8 @@ impl Default for HookConfig {
 
 const SIMULATE_REMOVAL: u32 = WM_APP + 1;
 const REINSTALL_NOW: u32 = WM_APP + 2;
+const SET_SUSPENDED: u32 = WM_APP + 3;
+const SET_KEYS: u32 = WM_APP + 4;
 
 /// Handle to the running hook thread; implements the core `Keyboard` seam.
 pub struct KeyboardHook {
@@ -165,6 +167,7 @@ pub struct KeyboardHook {
     thread_id: u32,
     reinstalls: Arc<AtomicU32>,
     health: Arc<HookHealth>,
+    pending_keys: Arc<std::sync::Mutex<Vec<u32>>>,
 }
 
 impl KeyboardHook {
@@ -180,6 +183,8 @@ impl KeyboardHook {
         let counter = reinstalls.clone();
         let health = Arc::new(HookHealth::default());
         let thread_health = health.clone();
+        let pending_keys = Arc::new(std::sync::Mutex::new(Vec::<u32>::new()));
+        let thread_pending = pending_keys.clone();
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         std::thread::spawn(move || {
             STATE.with(|s| {
@@ -218,13 +223,28 @@ impl KeyboardHook {
                         }
                     }
                     SIMULATE_REMOVAL => uninstall(),
+                    SET_SUSPENDED => STATE.with(|s| {
+                        if let Some(st) = s.borrow_mut().as_mut() {
+                            st.classifier.set_suspended(msg.wparam != 0);
+                        }
+                    }),
+                    SET_KEYS => {
+                        let keys = thread_pending.lock().map(|k| k.clone()).unwrap_or_default();
+                        if !keys.is_empty() {
+                            STATE.with(|s| {
+                                if let Some(st) = s.borrow_mut().as_mut() {
+                                    st.classifier.set_keys(&keys);
+                                }
+                            });
+                        }
+                    }
                     _ => {}
                 }
             }
             uninstall();
         });
         let thread_id = ready_rx.recv().map_err(|e| e.to_string())??;
-        Ok(Self { rx: ev_rx, thread_id, reinstalls, health })
+        Ok(Self { rx: ev_rx, thread_id, reinstalls, health, pending_keys })
     }
 
     /// Debug aid: remove the hook the way Windows would, silently.
@@ -241,6 +261,19 @@ impl KeyboardHook {
     /// "Dictation key unavailable".
     pub fn key_unavailable(&self) -> bool {
         self.health.key_unavailable()
+    }
+
+    /// Rebinds the Dictation key (one key, or a combination) without a restart.
+    pub fn set_keys(&self, vks: &[u32]) {
+        if let Ok(mut k) = self.pending_keys.lock() {
+            *k = vks.to_vec();
+        }
+        unsafe { PostThreadMessageW(self.thread_id, SET_KEYS, 0, 0) };
+    }
+
+    /// While suspended every key passes through (Settings is capturing a key).
+    pub fn set_suspended(&self, suspended: bool) {
+        unsafe { PostThreadMessageW(self.thread_id, SET_SUSPENDED, suspended as usize, 0) };
     }
 
     /// Non-blocking poll usable through a shared reference.
