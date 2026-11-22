@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360">
+  <rect width="1280" height="360" rx="24" fill="#f6f5fb"/>
+  <g opacity="0.10" fill="#fc5e53">
+    <rect x="1010" y="70" width="22" height="220" rx="11"/><rect x="1050" y="30" width="22" height="300" rx="11"/>
+    <rect x="1090" y="100" width="22" height="160" rx="11"/><rect x="1130" y="50" width="22" height="260" rx="11"/>
+    <rect x="1170" y="120" width="22" height="120" rx="11"/><rect x="970" y="130" width="22" height="100" rx="11"/>
+  </g>
+  <svg x="70" y="60" width="240" height="240" viewBox="380 380 1290 1290">
+    <path fill="#20027f" fill-rule="evenodd" d="M786 398C793 398 800 398 807 398L1087 398L1197 398C1289 398 1348 401 1431 445C1468 464 1501 488 1530 517C1600 586 1643 677 1651 775C1653 798 1653 822 1653 845L1653 942L1653 1212C1653 1236 1653 1257 1650 1281C1641 1374 1600 1461 1534 1527C1464 1597 1372 1640 1274 1648C1237 1651 1182 1649 1144 1649L935 1649C808 1650 728 1659 613 1597C565 1610 518 1630 470 1644C456 1649 436 1658 421 1652C375 1632 404 1591 413 1558C427 1519 440 1478 455 1439C448 1431 441 1416 436 1406C415 1360 402 1310 398 1260C396 1231 397 1195 397 1166L397 1013L397 870C397 842 396 806 398 780C404 690 440 605 499 537C574 452 673 406 786 398ZM801 474C805 474 810 474 814 474L1087 474L1189 474C1236 474 1275 473 1321 484C1381 499 1436 529 1480 573C1537 630 1569 702 1576 783C1577 808 1577 834 1577 859L1577 962L1577 1222C1577 1321 1549 1404 1478 1475C1421 1531 1347 1565 1267 1571C1238 1574 1197 1572 1167 1572L919 1573C870 1573 798 1576 753 1567C707 1558 663 1540 624 1513C582 1526 536 1545 494 1556C507 1515 524 1469 538 1429C501 1384 474 1305 473 1248C473 1217 473 1184 473 1152L473 987L473 864C473 820 470 777 481 734C494 675 522 622 563 579C627 511 709 477 801 474Z"/>
+    <g fill="#20027f"><rect x="855" y="723" width="70" height="599" rx="35"/><rect x="1122" y="723" width="71" height="598" rx="35.5"/><rect x="723" y="836" width="71" height="369" rx="35.5"/><rect x="1254" y="837" width="72" height="368" rx="36"/><rect x="589" y="911" width="72" height="230" rx="36"/><rect x="1389" y="911" width="72" height="230" rx="36"/></g>
+    <g fill="#fc5e53"><rect x="988" y="728" width="71" height="441" rx="35.5"/><circle cx="1022" cy="1272" r="36"/></g>
+  </svg>
+  <g font-family="Segoe UI, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif">
+    <text x="350" y="168" font-size="84" font-weight="700" fill="#20027f" letter-spacing="-1">Aloud Type</text>
+    <text x="352" y="222" font-size="30" fill="#4a4566">Speak anywhere. It types for you.</text>
+    <rect x="352" y="252" width="560" height="1.5" fill="#d9d5ea"/>
+    <text x="352" y="290" font-size="21" fill="#4a4566">Free  ·  Fully local Whisper  ·  Any text field  ·  Windows</text>
+  </g>
+</svg>
