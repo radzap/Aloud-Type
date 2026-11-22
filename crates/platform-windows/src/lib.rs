@@ -16,4 +16,7 @@ pub mod power_win;
 #[cfg(windows)]
 pub mod tray;
 pub mod settings_launcher;
+#[cfg(windows)]
+pub mod overlay;
+pub mod overlay_model;
 pub mod tray_model;

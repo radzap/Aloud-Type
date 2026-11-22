@@ -98,6 +98,6 @@ fn engine_and_crate_versions_are_pinned() {
     assert_eq!(whisper_rs::get_whisper_version(), pins::WHISPER_CPP);
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
     assert!(manifest.contains(&format!("whisper-rs = \"={}\"", pins::WHISPER_RS)));
-    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap();
+    let lock = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap().lines().collect::<Vec<_>>().join("\n");
     assert!(lock.contains(&format!("name = \"whisper-rs-sys\"\nversion = \"{}\"", pins::WHISPER_RS_SYS)));
 }
