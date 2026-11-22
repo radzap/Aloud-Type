@@ -232,43 +232,44 @@ mod tests {
     }
 }
 
-/// Placeholder icon art (ticket 22 replaces it): a filled disc, BGRA,
-/// `size` x `size`, transparent outside. Idle grey, listening blue, fault red.
-pub fn placeholder_icon_bgra(kind: IconKind, size: usize) -> Vec<u8> {
-    let (b, g, r) = match kind {
-        IconKind::Idle => (0x90, 0x90, 0x90),
-        IconKind::Listening => (0xE0, 0x80, 0x20),
-        IconKind::Fault => (0x30, 0x30, 0xD8),
-    };
-    let c = (size as f32 - 1.0) / 2.0;
-    let radius = size as f32 / 2.0 - 1.0;
-    let mut px = Vec::with_capacity(size * size * 4);
-    for y in 0..size {
-        for x in 0..size {
-            let (dx, dy) = (x as f32 - c, y as f32 - c);
-            if dx * dx + dy * dy <= radius * radius {
-                px.extend_from_slice(&[b, g, r, 0xFF]);
-            } else {
-                px.extend_from_slice(&[0, 0, 0, 0]);
-            }
-        }
+/// The tray icon file for a state. Windows does not recolour tray icons, so
+/// each state ships twice: `light_taskbar` picks the dark glyph.
+pub fn tray_ico(kind: IconKind, light_taskbar: bool) -> &'static [u8] {
+    macro_rules! ico {
+        ($n:literal) => {
+            include_bytes!(concat!("../../../assets/icons/tray/tray-", $n, ".ico")).as_slice()
+        };
     }
-    px
+    match (kind, light_taskbar) {
+        (IconKind::Idle, false) => ico!("idle-dark"),
+        (IconKind::Idle, true) => ico!("idle-light"),
+        (IconKind::Listening, false) => ico!("listening-dark"),
+        (IconKind::Listening, true) => ico!("listening-light"),
+        (IconKind::Fault, false) => ico!("fault-dark"),
+        (IconKind::Fault, true) => ico!("fault-light"),
+    }
 }
 
 #[cfg(test)]
 mod icon_tests {
     use super::*;
+    use crate::icon::ico_image;
 
     #[test]
-    fn placeholder_icons_differ_per_state_and_are_round() {
-        let size = 16;
-        let a = placeholder_icon_bgra(IconKind::Idle, size);
-        let b = placeholder_icon_bgra(IconKind::Fault, size);
-        assert_eq!(a.len(), size * size * 4);
-        assert_ne!(a, b);
-        assert_eq!(a[3], 0, "corner transparent");
-        let mid = (size / 2 * size + size / 2) * 4;
-        assert_eq!(a[mid + 3], 0xFF, "centre opaque");
+    fn every_tray_icon_has_a_small_and_a_large_image() {
+        for kind in [IconKind::Idle, IconKind::Listening, IconKind::Fault] {
+            for light in [false, true] {
+                let ico = tray_ico(kind, light);
+                assert_eq!(ico_image(ico, 16).unwrap().1, 16);
+                assert_eq!(ico_image(ico, 24).unwrap().1, 24);
+                // 150% scaling asks for 24, 125% for 20; odd sizes round up.
+                assert_eq!(ico_image(ico, 30).unwrap().1, 32);
+                assert_eq!(ico_image(ico, 512).unwrap().1, 48);
+            }
+        }
+        assert_ne!(
+            tray_ico(IconKind::Idle, false),
+            tray_ico(IconKind::Idle, true)
+        );
     }
 }

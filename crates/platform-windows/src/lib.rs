@@ -7,6 +7,7 @@ pub mod file_watch;
 #[cfg(windows)]
 pub mod hook;
 pub mod hook_health;
+pub mod icon;
 pub mod inject;
 #[cfg(windows)]
 pub mod inject_win;

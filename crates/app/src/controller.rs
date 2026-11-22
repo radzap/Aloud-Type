@@ -402,36 +402,62 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             self.monitor.platform_fault(reason);
             return; // the monitor's flush action ends the session
         }
+        if !self.take_audio() {
+            return;
+        }
+        self.pump_pending();
+        // A decode can outlast the monitor's stall limit (a larger model on
+        // CPU). What the stream delivered meanwhile shows it is alive; reading
+        // it before the monitor ticks keeps a slow decode from looking like a
+        // disconnected microphone. A stream that really stopped still has
+        // nothing here and is caught.
+        self.take_audio();
+    }
+
+    /// Move what the stream captured into the session; false if nothing came.
+    fn take_audio(&mut self) -> bool {
+        if self.session.is_none() {
+            return false;
+        }
         let samples = self.capture.read();
         if samples.is_empty() {
-            return;
+            return false;
         }
         self.monitor.audio(&samples, false);
         if let Some(s) = self.session.as_mut() {
             s.pending.extend_from_slice(&samples);
         }
-        self.pump_pending();
+        true
     }
 
-    /// Hand any further whole chunks that accumulated to the insertion.
+    /// Hand any whole chunks that accumulated to the insertion, each gated on
+    /// its own, then decode them together: a backlog (the previous decode took
+    /// longer than a chunk) costs one decode, not one per chunk.
     fn pump_pending(&mut self) {
         let chunk = (self.config.chunk_ms * 16) as usize;
         loop {
             let Some(s) = self.session.as_mut() else {
                 return;
             };
-            if s.failed || s.pending.len() < chunk {
+            if s.failed {
                 return;
+            }
+            if s.pending.len() < chunk {
+                break;
             }
             let part: Vec<f32> = s.pending.drain(..chunk).collect();
             self.last_gate.set(None);
-            s.insertion.feed(&part);
+            s.insertion.push(&part);
             if let Some(v) = self.last_gate.get() {
                 self.monitor.audio(&part, v);
             }
             if self.check_typing_faults() {
                 return;
             }
+        }
+        if let Some(s) = self.session.as_mut() {
+            s.insertion.decode_pending();
+            self.check_typing_faults();
         }
     }
 
@@ -486,7 +512,9 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
         if !s.failed {
             s.pending.extend_from_slice(&rest);
             if !s.pending.is_empty() {
-                s.insertion.feed(&std::mem::take(&mut s.pending));
+                // No streaming decode of its own for the tail: `end` runs the
+                // single final decode over everything not yet typed.
+                s.insertion.push(&std::mem::take(&mut s.pending));
             }
             s.insertion.end();
             let fault = self

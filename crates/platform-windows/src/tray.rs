@@ -3,9 +3,10 @@
 //! the calling (main) thread and has no timers of its own while idle: the
 //! only timer is the 3 second notice dismissal, alive only while the notice
 //! is on screen. The pure decisions live in `tray_model`.
+use crate::icon::hicon_from_ico;
 use crate::tray_model::{
-    self, double_click_command, menu, placeholder_icon_bgra, Command, IconKind, StartupAction,
-    TrayState, TrayView, NOTICE_DURATION_MS,
+    self, double_click_command, menu, tray_ico, Command, IconKind, StartupAction, TrayState,
+    TrayView, NOTICE_DURATION_MS,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -21,6 +22,8 @@ const WM_DESTROY: u32 = 0x0002;
 const WM_CLOSE: u32 = 0x0010;
 const WM_PAINT: u32 = 0x000F;
 const WM_TIMER: u32 = 0x0113;
+const WM_SETTINGCHANGE: u32 = 0x001A;
+const SM_CXSMICON: i32 = 49;
 const WM_NULL: u32 = 0;
 const WM_NCHITTEST: u32 = 0x0084;
 const WM_MOUSEACTIVATE: u32 = 0x0021;
@@ -91,14 +94,6 @@ struct NotifyIconDataW {
     balloon_icon: isize,
 }
 #[repr(C)]
-struct IconInfo {
-    is_icon: i32,
-    x_hotspot: u32,
-    y_hotspot: u32,
-    mask: isize,
-    color: isize,
-}
-#[repr(C)]
 #[derive(Default)]
 struct Rect {
     left: i32,
@@ -138,7 +133,6 @@ extern "system" {
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
     fn RegisterWindowMessageW(name: *const u16) -> u32;
-    fn CreateIconIndirect(info: *const IconInfo) -> isize;
     fn DestroyIcon(i: isize) -> i32;
     fn CreatePopupMenu() -> isize;
     fn AppendMenuW(m: isize, flags: u32, id: usize, text: *const u16) -> i32;
@@ -165,7 +159,6 @@ extern "system" {
 }
 #[link(name = "gdi32")]
 extern "system" {
-    fn CreateBitmap(w: i32, h: i32, planes: u32, bits: u32, data: *const u8) -> isize;
     fn DeleteObject(o: isize) -> i32;
     fn CreateSolidBrush(color: u32) -> isize;
     fn SetBkMode(dc: isize, mode: i32) -> i32;
@@ -266,6 +259,8 @@ struct Host {
     commands: Sender<Command>,
     state: TrayState,
     icons: [isize; 3],
+    /// The taskbar theme the icons were made for.
+    light: bool,
     icon_added: bool,
     taskbar_created: u32,
     notice_text: Vec<u16>,
@@ -283,25 +278,25 @@ fn icon_index(k: IconKind) -> usize {
     }
 }
 
-fn make_icon(kind: IconKind) -> isize {
-    const SIZE: usize = 32;
-    let color = placeholder_icon_bgra(kind, SIZE);
-    let mask = [0u8; SIZE * SIZE / 8];
-    unsafe {
-        let hc = CreateBitmap(SIZE as i32, SIZE as i32, 1, 32, color.as_ptr());
-        let hm = CreateBitmap(SIZE as i32, SIZE as i32, 1, 1, mask.as_ptr());
-        let info = IconInfo {
-            is_icon: 1,
-            x_hotspot: 0,
-            y_hotspot: 0,
-            mask: hm,
-            color: hc,
-        };
-        let icon = CreateIconIndirect(&info);
-        DeleteObject(hc);
-        DeleteObject(hm);
-        icon
-    }
+/// Whether the taskbar is light (Windows' "SystemUsesLightTheme"); dark if unknown.
+fn light_taskbar() -> bool {
+    winreg::RegKey::predef(winreg::enums::HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|k| k.get_value::<u32, _>("SystemUsesLightTheme"))
+        .is_ok_and(|v| v != 0)
+}
+
+fn make_icon(kind: IconKind, light: bool) -> isize {
+    let want = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16) as u32;
+    hicon_from_ico(tray_ico(kind, light), want)
+}
+
+fn make_icons(light: bool) -> [isize; 3] {
+    [
+        make_icon(IconKind::Idle, light),
+        make_icon(IconKind::Listening, light),
+        make_icon(IconKind::Fault, light),
+    ]
 }
 
 fn notify_data(hwnd: Hwnd, flags: u32, icon: isize, tip: &str) -> NotifyIconDataW {
@@ -428,6 +423,25 @@ unsafe extern "system" fn tray_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) ->
                 }
             });
             0
+        }
+        WM_SETTINGCHANGE => {
+            // The taskbar theme may have flipped: swap to the matching glyphs.
+            let light = light_taskbar();
+            HOST.with(|h| {
+                if let Some(host) = h.borrow_mut().as_mut() {
+                    if host.light != light {
+                        let old = std::mem::replace(&mut host.icons, make_icons(light));
+                        host.light = light;
+                        if let Some(v) = host.state.current().cloned() {
+                            apply_view(host, hwnd, &v);
+                        }
+                        for i in old {
+                            DestroyIcon(i);
+                        }
+                    }
+                }
+            });
+            DefWindowProcW(hwnd, msg, w, l)
         }
         WM_CLOSE => {
             DestroyWindow(hwnd);
@@ -587,16 +601,14 @@ pub fn run(
             return Err(std::io::Error::last_os_error());
         }
         handle.inner.hwnd.store(hwnd, Ordering::SeqCst);
-        let icons = [
-            make_icon(IconKind::Idle),
-            make_icon(IconKind::Listening),
-            make_icon(IconKind::Fault),
-        ];
+        let light = light_taskbar();
+        let icons = make_icons(light);
         let mut host = Host {
             handle: handle.clone(),
             commands: commands.clone(),
             state: TrayState::default(),
             icons,
+            light,
             icon_added: false,
             taskbar_created: RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
             notice_text: Vec::new(),

@@ -72,6 +72,8 @@ pub struct StreamingInsertion<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock
     fault: Option<TypingFault>,
     /// The words of the last decode and the utterance length it covered.
     last_decode: Option<(usize, Vec<String>)>,
+    /// Speech was pushed that no streaming decode has seen yet.
+    undecoded: bool,
 }
 
 impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V, T, C> {
@@ -101,6 +103,7 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
             fed_samples: 0,
             fault: None,
             last_decode: None,
+            undecoded: false,
         }
     }
 
@@ -111,6 +114,15 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
 
     /// Feed newly captured audio; may type text.
     pub fn feed(&mut self, samples: &[f32]) {
+        self.push(samples);
+        self.decode_pending();
+    }
+
+    /// Gate and keep newly captured audio without a streaming decode yet.
+    /// Pushing a backlog chunk by chunk and calling [`Self::decode_pending`]
+    /// once decodes it all in one go, so a slow decoder never falls further
+    /// behind by decoding every chunk of the backlog separately.
+    pub fn push(&mut self, samples: &[f32]) {
         if samples.is_empty() || self.fault.is_some() {
             return;
         }
@@ -135,9 +147,18 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
             rest = tail;
             if self.audio.len() >= self.config.max_utterance_samples {
                 self.finish_utterance();
-            } else if !self.fallback {
-                self.stream_decode();
+                self.undecoded = false;
+            } else {
+                self.undecoded = true;
             }
+        }
+    }
+
+    /// Run one streaming decode over audio pushed since the last one (none in
+    /// fallback mode, which decodes at pauses instead).
+    pub fn decode_pending(&mut self) {
+        if std::mem::take(&mut self.undecoded) && !self.fallback && self.fault.is_none() {
+            self.stream_decode();
         }
     }
 
@@ -349,6 +370,27 @@ mod tests {
         assert_eq!(r.sink.typed(), "");
         r.ins.feed(&SPEECH); // agree on "hello world how": type "hello world", hold "how"
         assert_eq!(r.sink.typed(), "hello world");
+    }
+
+    #[test]
+    fn a_pushed_backlog_costs_one_decode_over_all_of_it() {
+        let mut r = rig(vec!["a b c", "a b c d"], 10);
+        for _ in 0..3 {
+            r.ins.push(&SPEECH);
+        }
+        r.ins.push(&SILENCE);
+        assert!(r.lens.borrow().is_empty(), "push alone never decodes");
+        r.ins.decode_pending();
+        assert_eq!(
+            *r.lens.borrow(),
+            vec![12],
+            "one decode of the three speech chunks"
+        );
+        r.ins.decode_pending();
+        assert_eq!(r.lens.borrow().len(), 1, "nothing new: no decode");
+        r.ins.end(); // the last decode already covers everything
+        assert_eq!(r.lens.borrow().len(), 1);
+        assert_eq!(r.sink.typed(), "a b c");
     }
 
     #[test]

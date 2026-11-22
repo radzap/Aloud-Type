@@ -1,0 +1,17 @@
+# whisper.cpp build settings, read by whisper-rs-sys's build script (it passes
+# every CMAKE_* / GGML_* environment variable to CMake as a define).
+[env]
+# The `cmake` crate overwrites CMAKE_<LANG>_FLAGS_RELEASE under the Visual Studio
+# generator with flags that carry no optimisation level, so whisper.cpp was
+# compiled with /Od (about 15x slower decodes). Defining them here stops the
+# override; /MD must stay to match Rust's runtime.
+CMAKE_C_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+CMAKE_CXX_FLAGS_RELEASE = "/MD /O2 /Ob2 /DNDEBUG"
+# Target a fixed CPU level (AVX2 + FMA + F16C: Haswell / Zen 1 and later)
+# instead of whatever the build machine has, so a release built on an AVX-512
+# machine still runs everywhere.
+GGML_NATIVE = "OFF"
+GGML_AVX = "ON"
+GGML_AVX2 = "ON"
+GGML_FMA = "ON"
+GGML_F16C = "ON"

@@ -25,3 +25,6 @@ aloud-type-recognizer = { path = "../recognizer" }
 [dev-dependencies]
 aloud-type-recognizer = { path = "../recognizer" }
 tempfile = "3"
+
+[build-dependencies]
+embed-resource = "3.0.12"

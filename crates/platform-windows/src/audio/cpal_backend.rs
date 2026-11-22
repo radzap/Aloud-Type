@@ -122,4 +122,18 @@ mod tests {
     fn listing_does_not_panic_without_a_microphone() {
         let _ = CpalBackend.list_inputs();
     }
+
+    /// The id saved by Settings must find the same endpoint again when a Dictation opens it.
+    #[test]
+    fn listed_ids_round_trip_to_the_same_device() {
+        let host = cpal::default_host();
+        for d in CpalBackend.list_inputs() {
+            let found =
+                d.id.parse::<DeviceId>()
+                    .ok()
+                    .and_then(|id| host.device_by_id(&id))
+                    .unwrap_or_else(|| panic!("id did not round-trip: {}", d.id));
+            assert_eq!(found.id().unwrap().to_string(), d.id);
+        }
+    }
 }

@@ -174,6 +174,12 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
         out
     }
 
+    /// Re-read the settings file: another part of the window (the Speech
+    /// model list) writes it through its own handle.
+    pub fn reload(&mut self) {
+        self.config.reload();
+    }
+
     /// English-only Speech models cannot take another language.
     pub fn language_enabled(&self) -> bool {
         !is_english_only(&self.config.value().speech_model)
@@ -367,6 +373,23 @@ mod tests {
         assert!(!s.language_enabled());
         s.set_language(Language::Auto);
         assert_ne!(reread(&p).language, Language::Auto);
+    }
+
+    #[test]
+    fn a_model_chosen_elsewhere_in_the_window_unlocks_the_language_after_reload() {
+        let (mut s, _f, _d, p) = session(Login::default());
+        s.config
+            .update(|x| x.speech_model = "tiny.en-q5_1".into())
+            .unwrap();
+        assert!(!s.language_enabled());
+        // The model list writes the same file through its own handle.
+        ConfigFile::<Settings>::open(&p)
+            .update(|x| x.speech_model = "base-q5_1".into())
+            .unwrap();
+        s.reload();
+        assert!(s.language_enabled());
+        s.set_language(Language::Fixed("cs".into()));
+        assert_eq!(reread(&p).language, Language::Fixed("cs".into()));
     }
 
     #[test]

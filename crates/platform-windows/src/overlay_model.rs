@@ -315,6 +315,19 @@ pub struct Frame {
     pub show_text: bool,
 }
 
+/// Speech RMS from a microphone is small (normal talking is about 0.01..0.1),
+/// so a linear scale barely moves the bars. Map it onto decibels instead:
+/// below `FLOOR_DB` (room noise) shows nothing, `CEIL_DB` and above is full.
+pub fn loudness(rms: f32) -> f32 {
+    const FLOOR_DB: f32 = -55.0;
+    const CEIL_DB: f32 = -15.0;
+    if rms.is_nan() || rms <= 0.0 {
+        return 0.0;
+    }
+    let db = 20.0 * rms.log10();
+    ((db - FLOOR_DB) / (CEIL_DB - FLOOR_DB)).clamp(0.0, 1.0)
+}
+
 fn ease_out(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     1.0 - (1.0 - t).powi(3)
@@ -380,7 +393,7 @@ impl Animator {
         self.style = style;
         let new = look(ind, style);
         self.level_target = match ind {
-            Indicator::Listening { level, .. } => level.clamp(0.0, 1.0),
+            Indicator::Listening { level, .. } => loudness(*level),
             _ => 0.0,
         };
         match new {
@@ -731,6 +744,17 @@ mod tests {
 
     fn listening(level: f32) -> Indicator {
         Indicator::Listening { level, note: None }
+    }
+
+    #[test]
+    fn normal_speech_fills_a_good_part_of_the_bars_and_silence_none() {
+        assert_eq!(loudness(0.0), 0.0);
+        assert_eq!(loudness(f32::NAN), 0.0);
+        assert!(loudness(0.0005) < 0.05, "room noise stays flat");
+        let talk = loudness(0.03);
+        assert!(talk > 0.5 && talk < 0.9, "normal speech {talk}");
+        assert_eq!(loudness(0.5), 1.0);
+        assert!(loudness(0.01) < loudness(0.02));
     }
     fn red(reason: FaultReason) -> Indicator {
         Indicator::ListeningFault {

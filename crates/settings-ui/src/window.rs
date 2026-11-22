@@ -5,14 +5,17 @@ use crate::capture::CaptureState;
 use crate::codes::{display_binding, vk_for_code_name};
 use crate::download::{download_model, DownloadError, UreqHttp};
 use crate::ipc::PipeClient;
-use crate::items_view::{ItemsMsg, ItemsPanel};
+use crate::items_view::{card, labelled, muted, ItemsMsg, ItemsPanel};
 use crate::items_win::{WinLogin, WinMics};
 use crate::manager::{ModelManager, ModelStatus, Selection};
 use crate::session::RebindSession;
 use aloud_type_config::{AppPaths, ConfigFile};
 use aloud_type_models::{find, is_installed, VAD_MODEL};
-use iced::widget::{button, column, row, scrollable, text};
-use iced::{keyboard, Element, Subscription, Task};
+use iced::alignment::Horizontal::Right;
+use iced::alignment::Vertical::Center;
+use iced::widget::{button, column, container, progress_bar, radio, row, scrollable, text};
+use iced::Length::{Fill, FillPortion};
+use iced::{keyboard, window, Element, Size, Subscription, Task};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -128,6 +131,8 @@ impl App {
                 if self.models.select(id) == Selection::NeedsDownload {
                     return self.begin_download(id);
                 }
+                // The model decides whether a language can be picked.
+                self.items.reload();
             }
             Message::Download(id) => return self.begin_download(id),
             Message::DownloadTick => {
@@ -139,9 +144,13 @@ impl App {
                         None => self.models.progress(id, g.done, g.total),
                     }
                 }
-                for (id, r) in finished {
-                    self.workers.retain(|(w, _)| *w != id);
-                    self.models.finish_download(id, r);
+                for (id, r) in &finished {
+                    self.workers.retain(|(w, _)| w != id);
+                    self.models.finish_download(id, *r);
+                }
+                if !finished.is_empty() {
+                    // A finished download may have switched to its model.
+                    self.items.reload();
                 }
                 if !self.workers.is_empty() {
                     return tick_after_millis(300, Message::DownloadTick);
@@ -181,39 +190,60 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let left = column![self.dictation_card(), self.model_card()].spacing(14);
+        let right = column![
+            self.items.microphone_card().map(Message::Items),
+            self.items.indicator_card().map(Message::Items),
+            self.items.performance_card().map(Message::Items),
+            self.items.general_card().map(Message::Items),
+        ]
+        .spacing(14);
+        let body = row![left.width(FillPortion(1)), right.width(FillPortion(1))].spacing(14);
+        scrollable(container(body).padding(18)).into()
+    }
+
+    fn dictation_card(&self) -> Element<'_, Message> {
         let label = if self.session.is_capturing() {
             "Press a key...".to_string()
         } else {
             display_binding(self.session.dictation_key())
         };
-        let mut col = column![
-            text("Dictation key").size(18),
-            row![button(text(label)).on_press(Message::StartCapture)].spacing(8),
-        ]
-        .spacing(10)
-        .padding(20);
+        let mut col = column![labelled(
+            "Dictation key",
+            row![
+                button(text(label)).on_press(Message::StartCapture),
+                muted("Click, then press the key or combination to use.")
+            ]
+            .spacing(10)
+            .align_y(Center)
+        )]
+        .spacing(10);
         if self.session.is_capturing() {
-            col =
-                col.push(text("Press the key or combination, then release. Esc cancels.").size(13));
+            col = col.push(muted(
+                "Press the key or combination, then release. Esc cancels.",
+            ));
         }
         if let Some(i) = &self.info {
-            col = col.push(text(i.clone()).size(14));
+            col = col.push(text(i.clone()).size(13));
         }
         if let Some(w) = &self.warning {
-            col = col.push(text(format!("Warning: {w}")).size(14));
+            col = col.push(text(format!("Warning: {w}")).size(13).style(text::warning));
         }
         if let Some(e) = self.session.save_error() {
-            col = col.push(text(format!("Could not save: {e}")).size(14));
+            col = col.push(
+                text(format!("Could not save: {e}"))
+                    .size(13)
+                    .style(text::danger),
+            );
         }
-        let col = col
-            .push(text(HELP_LINE).size(12))
-            .push(self.model_section())
-            .push(self.items.view().map(Message::Items));
-        scrollable(col).into()
+        col = col
+            .push(muted(HELP_LINE))
+            .push(self.items.language_field().map(Message::Items));
+        card("Dictation", col)
     }
 
-    fn model_section(&self) -> Element<'_, Message> {
-        let mut col = column![text("Speech model").size(18)].spacing(6);
+    fn model_card(&self) -> Element<'_, Message> {
+        let mut col = column![].spacing(6);
         if self.models.needs_setup() {
             let m = self.models.first_run_model();
             col = col.push(text("Download a Speech model to start dictating. It is a one-time download; afterwards Aloud Type never uses the network.").size(13));
@@ -226,35 +256,51 @@ impl App {
                 .on_press(Message::Download(m.id)),
             );
         }
+        let selected = self.models.rows().iter().find(|r| r.selected).map(|r| r.id);
         for r in self.models.rows() {
-            let mark = if r.selected { "(x)" } else { "( )" };
-            let name = text(format!("{mark} {}  {}", r.label, r.size_text)).size(14);
+            let pick = radio(r.label, r.id, selected, Message::SelectModel)
+                .size(16)
+                .text_size(14)
+                .width(Fill);
             let status: Element<'_, Message> = match &r.status {
-                ModelStatus::Downloaded => button(text("Use"))
-                    .on_press_maybe((!r.selected).then_some(Message::SelectModel(r.id)))
+                ModelStatus::Downloaded => muted("Downloaded").into(),
+                ModelStatus::NotDownloaded => button(text("Download").size(13))
+                    .style(button::secondary)
+                    .on_press(Message::Download(r.id))
                     .into(),
-                ModelStatus::NotDownloaded => button(text("Download"))
-                    .on_press(Message::SelectModel(r.id))
-                    .into(),
-                ModelStatus::Downloading { done, total } => text(format!(
-                    "Downloading {}%",
-                    if *total == 0 { 0 } else { done * 100 / total }
-                ))
-                .size(13)
-                .into(),
+                ModelStatus::Downloading { done, total } => {
+                    let pct = if *total == 0 {
+                        0.0
+                    } else {
+                        *done as f32 * 100.0 / *total as f32
+                    };
+                    progress_bar(0.0..=100.0, pct).length(90).girth(8).into()
+                }
                 ModelStatus::Failed(e) => row![
-                    text(e.message()).size(13),
-                    button(text("Retry")).on_press(Message::Download(r.id))
+                    text(e.message()).size(12).style(text::danger),
+                    button(text("Retry").size(13))
+                        .style(button::secondary)
+                        .on_press(Message::Download(r.id))
                 ]
-                .spacing(8)
+                .spacing(6)
+                .align_y(Center)
                 .into(),
             };
-            col = col.push(row![name, status].spacing(10));
+            col = col.push(
+                row![
+                    pick,
+                    muted(r.size_text.clone()).width(60),
+                    container(status).width(100).align_x(Right),
+                ]
+                .spacing(8)
+                .height(32)
+                .align_y(Center),
+            );
         }
-        if !self.models.language_enabled() {
-            col = col.push(text("Language: English (this model is English only)").size(13));
-        }
-        col.into()
+        col = col.push(muted(
+            "Pick a model to use it; one that is not downloaded yet downloads first. Larger models are more accurate but slower.",
+        ));
+        card("Speech model", col)
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -296,6 +342,21 @@ pub fn run() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .title("Aloud Type Settings")
         .subscription(App::subscription)
-        .window_size((520.0, 700.0))
+        .window(window::Settings {
+            size: Size::new(940.0, 640.0),
+            min_size: Some(Size::new(760.0, 480.0)),
+            icon: app_icon(),
+            ..window::Settings::default()
+        })
         .run()
+}
+
+/// The app icon for the title bar and taskbar (decoded by Windows from app.ico).
+fn app_icon() -> Option<window::Icon> {
+    const PX: u32 = 64;
+    let rgba = aloud_type_platform_windows::icon::rgba_from_ico(
+        aloud_type_platform_windows::icon::APP_ICO,
+        PX,
+    )?;
+    window::icon::from_rgba(rgba, PX, PX).ok()
 }

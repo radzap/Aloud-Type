@@ -384,6 +384,107 @@ fn a_brief_non_speech_verdict_inside_speech_does_not_cut_a_hole_in_the_audio() {
     assert_eq!(*lens.borrow(), vec![1600, 3200, 4800]);
 }
 
+/// Recognizer whose decode takes `ms` on the fake clock while the microphone
+/// keeps delivering audio into the capture buffer, as a real slow model does.
+struct SlowDecode {
+    clock: FakeClock,
+    cap: FakeCapture,
+    ms: u64,
+}
+impl aloud_type_core::Recognizer for SlowDecode {
+    fn recognize(&mut self, _: &[f32], _: &str, _: Option<&str>) -> Vec<Segment> {
+        self.clock.advance(self.ms);
+        self.cap.push(&vec![0.5; (self.ms * 16) as usize]);
+        seg("words")
+    }
+}
+
+#[test]
+fn a_decode_longer_than_the_stall_limit_is_not_a_disconnected_microphone() {
+    let (kb, clock, cap, sink) = (
+        FakeKeyboard::new(),
+        FakeClock::new(),
+        FakeCapture::default(),
+        FakeSink::default(),
+    );
+    let mut c = Controller::new(Parts {
+        keyboard: kb.clone(),
+        clock: clock.clone(),
+        lifecycle: LifecycleConfig::default(),
+        capture: Box::new(cap.clone()),
+        recognizer: Box::new(SlowDecode {
+            clock: clock.clone(),
+            cap: cap.clone(),
+            ms: aloud_type_core::listening::STALL_MS + 500,
+        }),
+        voice_gate: Box::new(aloud_type_core::testing::FakeVoiceGate(0.1)),
+        sink: Box::new(sink.clone()),
+        start_gate: Box::new(FakeStartGate::default()),
+        typing_faults: Box::new(sink),
+        settings: Box::new(DictationSettings::default),
+        config: ControllerConfig {
+            chunk_ms: CHUNK_MS,
+            hangover_ms: 1000,
+        },
+    });
+    kb.press(KeyEvent::DictationKeyDown);
+    c.step();
+    for _ in 0..10 {
+        clock.advance(CHUNK_MS);
+        cap.push(&vec![0.5; (CHUNK_MS * 16) as usize]);
+        c.step();
+        assert!(
+            matches!(c.indicator(), Indicator::Listening { .. }),
+            "{:?}",
+            c.indicator()
+        );
+    }
+    assert!(cap.is_open());
+}
+
+#[test]
+fn a_microphone_that_stops_delivering_during_a_slow_decode_is_still_caught() {
+    let (kb, clock, cap, sink) = (
+        FakeKeyboard::new(),
+        FakeClock::new(),
+        FakeCapture::default(),
+        FakeSink::default(),
+    );
+    let mut c = Controller::new(Parts {
+        keyboard: kb.clone(),
+        clock: clock.clone(),
+        lifecycle: LifecycleConfig::default(),
+        capture: Box::new(cap.clone()),
+        // The decode takes long and nothing arrives meanwhile.
+        recognizer: Box::new(SlowDecode {
+            clock: clock.clone(),
+            cap: FakeCapture::default(),
+            ms: aloud_type_core::listening::STALL_MS + 500,
+        }),
+        voice_gate: Box::new(aloud_type_core::testing::FakeVoiceGate(0.1)),
+        sink: Box::new(sink.clone()),
+        start_gate: Box::new(FakeStartGate::default()),
+        typing_faults: Box::new(sink),
+        settings: Box::new(DictationSettings::default),
+        config: ControllerConfig {
+            chunk_ms: CHUNK_MS,
+            hangover_ms: 1000,
+        },
+    });
+    kb.press(KeyEvent::DictationKeyDown);
+    c.step();
+    clock.advance(CHUNK_MS);
+    cap.push(&vec![0.5; (CHUNK_MS * 16) as usize]);
+    c.step();
+    assert!(matches!(
+        c.indicator(),
+        Indicator::ListeningFault {
+            reason: FaultReason::Disconnected,
+            ..
+        }
+    ));
+}
+
 mod residency {
     use super::*;
     use aloud_type_app::residency::{Model, Residency, IDLE_UNLOAD_MS};
