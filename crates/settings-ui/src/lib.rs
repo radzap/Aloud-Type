@@ -8,5 +8,8 @@ pub mod session;
 pub mod codes;
 pub mod download;
 pub mod manager;
+pub mod items;
+pub mod items_view;
+pub mod items_win;
 mod window;
 pub use window::{run, HELP_LINE};

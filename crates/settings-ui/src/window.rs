@@ -8,8 +8,10 @@ use crate::ipc::PipeClient;
 use crate::manager::{ModelManager, ModelStatus, Selection};
 use crate::session::RebindSession;
 use aloud_type_config::{AppPaths, ConfigFile};
+use crate::items_view::{ItemsMsg, ItemsPanel};
+use crate::items_win::{WinLogin, WinMics};
 use aloud_type_models::find;
-use iced::widget::{button, column, row, text};
+use iced::widget::{button, column, row, scrollable, text};
 use iced::{keyboard, Element, Subscription, Task};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -32,10 +34,12 @@ enum Message {
     SelectModel(&'static str),
     Download(&'static str),
     DownloadTick,
+    Items(ItemsMsg),
 }
 
 struct App {
     session: RebindSession<PipeClient>,
+    items: ItemsPanel<WinLogin, WinMics>,
     started: Instant,
     info: Option<String>,
     warning: Option<String>,
@@ -48,6 +52,7 @@ impl App {
         let paths = AppPaths::from_env().unwrap_or_else(|| AppPaths::under(std::path::Path::new(".")));
         let app = App {
             session: RebindSession::new(ConfigFile::open(paths.settings_file()), PipeClient::default()),
+            items: ItemsPanel::new(ConfigFile::open(paths.settings_file()), WinLogin::new(), WinMics::new()),
             started: Instant::now(),
             info: None,
             warning: None,
@@ -144,6 +149,7 @@ impl App {
                 };
                 self.apply(st);
             }
+            Message::Items(m) => self.items.update(m),
             Message::CaptureTick => {
                 let now = self.now();
                 let st = self.session.tick(now);
@@ -180,8 +186,8 @@ impl App {
         if let Some(e) = self.session.save_error() {
             col = col.push(text(format!("Could not save: {e}")).size(14));
         }
-        col = col.push(text(HELP_LINE).size(12));
-        col.push(self.model_section()).into()
+        let col = col.push(text(HELP_LINE).size(12)).push(self.model_section()).push(self.items.view().map(Message::Items));
+        scrollable(col).into()
     }
 
     fn model_section(&self) -> Element<'_, Message> {
@@ -254,6 +260,6 @@ pub fn run() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .title("Aloud Type Settings")
         .subscription(App::subscription)
-        .window_size((520.0, 600.0))
+        .window_size((520.0, 700.0))
         .run()
 }
