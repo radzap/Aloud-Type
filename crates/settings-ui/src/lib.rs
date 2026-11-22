@@ -6,5 +6,7 @@ pub mod keys;
 pub mod rules;
 pub mod session;
 pub mod codes;
+pub mod download;
+pub mod manager;
 mod window;
 pub use window::{run, HELP_LINE};
