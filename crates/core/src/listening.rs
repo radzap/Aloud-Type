@@ -11,8 +11,10 @@ pub const STALL_MS: Millis = 1000;
 pub const DIGITAL_SILENCE_MS: Millis = 4000;
 pub const HOLD_LINGER_MS: Millis = 2000;
 pub const HANDS_FREE_DISMISS_MS: Millis = 5000;
-pub const FALLBACK_NOTE_MS: Millis = 3000;
-pub const FALLBACK_NOTE: &str = "Microphone not found, using the system default";
+pub const FALLBACK_NOTE_MS: Millis = 2000;
+pub const FALLBACK_NOTE: &str = "Using default microphone";
+/// A Dictation refused at the key press (administrator window) shows its notice this long.
+pub const REFUSAL_NOTICE_MS: Millis = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultReason {
@@ -104,7 +106,8 @@ struct Active {
 enum Phase {
     Idle,
     Active(Active),
-    Fault { what: Standing, dismiss_at: Option<Millis> },
+    /// `fixed`: the dismissal time does not depend on the key (a refused start).
+    Fault { what: Standing, dismiss_at: Option<Millis>, fixed: bool },
 }
 
 pub struct ListeningMonitor<C: Clock> {
@@ -143,7 +146,7 @@ impl<C: Clock> ListeningMonitor<C> {
         self.mode = Mode::HandsFree;
         self.key_held = false;
         let now = self.clock.now();
-        if let Phase::Fault { dismiss_at, .. } = &mut self.phase {
+        if let Phase::Fault { dismiss_at, fixed: false, .. } = &mut self.phase {
             *dismiss_at = Some(now + HANDS_FREE_DISMISS_MS);
         }
     }
@@ -152,7 +155,7 @@ impl<C: Clock> ListeningMonitor<C> {
     pub fn release(&mut self) {
         self.key_held = false;
         let now = self.clock.now();
-        if let (Phase::Fault { dismiss_at, .. }, Mode::Hold) = (&mut self.phase, self.mode) {
+        if let (Phase::Fault { dismiss_at, fixed: false, .. }, Mode::Hold) = (&mut self.phase, self.mode) {
             *dismiss_at = Some(now + HOLD_LINGER_MS);
         }
     }
@@ -207,6 +210,19 @@ impl<C: Clock> ListeningMonitor<C> {
         self.end_with(reason);
     }
 
+    /// The Dictation key went down but no Dictation may start (an administrator
+    /// window has focus): an amber notice for a fixed ~2 s, whatever the key does.
+    pub fn refuse_start(&mut self, message: impl Into<String>) {
+        let now = self.clock.now();
+        self.mode = Mode::Hold;
+        self.key_held = true;
+        self.phase = Phase::Fault {
+            what: Standing::Typing(message.into()),
+            dismiss_at: Some(now + REFUSAL_NOTICE_MS),
+            fixed: true,
+        };
+    }
+
     /// Typing could not be delivered: ends the Dictation with an amber message.
     pub fn typing_fault(&mut self, message: impl Into<String>) {
         if !matches!(self.phase, Phase::Active(_)) {
@@ -252,7 +268,7 @@ impl<C: Clock> ListeningMonitor<C> {
         let now = self.clock.now();
         let dismiss_at = (self.mode == Mode::HandsFree).then_some(now + HANDS_FREE_DISMISS_MS);
         self.actions.push(Action::EndDictationFlushAudio);
-        self.phase = Phase::Fault { what, dismiss_at };
+        self.phase = Phase::Fault { what, dismiss_at, fixed: false };
     }
 
     pub fn take_actions(&mut self) -> Vec<Action> {
@@ -552,8 +568,48 @@ mod tests {
         m.start(true);
         feed(&mut m, &c, 100, &VOICE, true);
         assert_eq!(m.indicator(), Indicator::Listening { level: 0.5, note: Some(FALLBACK_NOTE) });
-        feed(&mut m, &c, 2900, &VOICE, true);
+        feed(&mut m, &c, 1900, &VOICE, true);
         assert_eq!(m.indicator(), Indicator::Listening { level: 0.5, note: None });
+    }
+
+    #[test]
+    fn fallback_note_reads_using_default_microphone_for_about_2s() {
+        let (mut m, c) = rig();
+        m.start(true);
+        assert_eq!(m.indicator(), Indicator::Listening { level: 0.0, note: Some("Using default microphone") });
+        feed(&mut m, &c, 1900, &VOICE, true);
+        assert!(matches!(m.indicator(), Indicator::Listening { note: Some(_), .. }));
+        feed(&mut m, &c, 100, &VOICE, true);
+        assert!(matches!(m.indicator(), Indicator::Listening { note: None, .. }));
+    }
+
+    #[test]
+    fn start_refusal_notice_lasts_2s_even_when_the_press_was_a_tap() {
+        let (mut m, c) = rig();
+        m.refuse_start("Can't type into an administrator window");
+        assert_eq!(m.indicator(), Indicator::TypingFault { message: "Can't type into an administrator window".into() });
+        assert!(m.take_actions().is_empty());
+        c.advance(50);
+        m.release();
+        m.latch(); // the engine saw a tap and went hands-free
+        c.advance(1949);
+        m.tick();
+        assert!(matches!(m.indicator(), Indicator::TypingFault { .. }), "still up just before 2 s");
+        c.advance(1);
+        m.tick();
+        assert_eq!(m.indicator(), Indicator::Hidden);
+    }
+
+    #[test]
+    fn start_refusal_notice_lasts_2s_when_the_key_stays_held() {
+        let (mut m, c) = rig();
+        m.refuse_start("x");
+        c.advance(1999);
+        m.tick();
+        assert!(matches!(m.indicator(), Indicator::TypingFault { .. }));
+        c.advance(1);
+        m.tick();
+        assert_eq!(m.indicator(), Indicator::Hidden);
     }
 
     #[test]

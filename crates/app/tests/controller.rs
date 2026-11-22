@@ -112,6 +112,22 @@ fn elevated_window_shows_an_amber_notice_and_starts_nothing() {
 }
 
 #[test]
+fn elevated_notice_on_a_tap_still_goes_after_about_2_seconds() {
+    let mut r = rig(vec![]);
+    r.gate.set(Some("Can't type into an administrator window"));
+    r.press();
+    r.clock.advance(100);
+    r.release(); // a tap
+    r.wait(1800);
+    assert!(matches!(r.c.indicator(), Indicator::TypingFault { .. }));
+    r.wait(200);
+    assert_eq!(r.c.indicator(), Indicator::Hidden);
+    r.gate.set(None);
+    r.press(); // the engine is not stuck hands-free: this starts a Dictation
+    assert!(r.cap.is_open());
+}
+
+#[test]
 fn missing_microphone_is_a_red_fault_that_lingers_after_release() {
     let mut r = rig(vec![]);
     r.cap.fail_start(FaultReason::NoMicrophone);

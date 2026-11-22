@@ -804,12 +804,12 @@ mod tests {
         let l = look(&listening(0.2), Style::TraceStrip).unwrap();
         assert_eq!((l.tone, l.glyph, l.w, l.h), (Tone::Neutral, Glyph::Trace, STRIP_W, STRIP_H));
         let n = look(
-            &Indicator::Listening { level: 0.2, note: Some("Microphone not found, using the system default") },
+            &Indicator::Listening { level: 0.2, note: Some("Using default microphone") },
             Style::TraceStrip,
         )
         .unwrap();
         assert_eq!(n.glyph, Glyph::None);
-        assert_eq!(n.title, "Microphone not found, using the system default");
+        assert_eq!(n.title, "Using default microphone");
     }
 
     #[test]

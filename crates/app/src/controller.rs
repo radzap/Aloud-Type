@@ -297,9 +297,7 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             }
         }
         if let Some(msg) = self.start_gate.check() {
-            self.monitor.start(false);
-            self.monitor.typing_fault(msg);
-            self.monitor.take_actions();
+            self.monitor.refuse_start(msg);
             return;
         }
         let settings = (self.settings)();
