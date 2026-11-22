@@ -8,6 +8,12 @@ license.workspace = true
 aloud-type-core.workspace = true
 whisper-rs = "=0.16.0"
 num_cpus = "1"
+aloud-type-config = { path = "../config" }
+
+[features]
+# Vulkan GPU backend (needs the Vulkan SDK to build). Off by default: CPU-only build.
+vulkan = ["whisper-rs/vulkan"]
 
 [dev-dependencies]
 sha2 = "0.10"
+tempfile = "3"

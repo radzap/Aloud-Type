@@ -1,6 +1,8 @@
 //! Whisper recognizer and Silero voice gate: implementations of the core seams
 //! ([`Recognizer`], [`VoiceGate`]) on top of the pinned `whisper-rs` binding.
 
+pub mod gpu;
+
 use aloud_type_core::{Millis, Recognizer, Segment, VoiceGate, Word};
 use std::path::Path;
 use whisper_rs::{
@@ -58,10 +60,24 @@ impl WhisperRecognizer {
         Self::load_with_threads(model, decode_threads(num_cpus::get_physical()))
     }
 
+    /// CPU-only load.
     pub fn load_with_threads(model: &Path, threads: usize) -> Result<Self, RecognizerError> {
+        Self::load_on(model, threads, None)
+    }
+
+    /// Load on the GPU backend device `gpu_device` (CPU when `None`). Without the `vulkan`
+    /// feature there is no GPU backend and a GPU load is an error.
+    pub fn load_on(model: &Path, threads: usize, gpu_device: Option<i32>) -> Result<Self, RecognizerError> {
         let path = model.to_str().ok_or_else(|| RecognizerError("non-UTF-8 model path".into()))?;
-        let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
-            .map_err(|e| err("load model", e))?;
+        if gpu_device.is_some() && !cfg!(feature = "vulkan") {
+            return Err(RecognizerError("this build has no GPU backend".into()));
+        }
+        let mut params = WhisperContextParameters::default();
+        params.use_gpu(gpu_device.is_some());
+        if let Some(d) = gpu_device {
+            params.gpu_device(d);
+        }
+        let ctx = WhisperContext::new_with_params(path, params).map_err(|e| err("load model", e))?;
         let state = ctx.create_state().map_err(|e| err("create state", e))?;
         Ok(Self { _ctx: ctx, state, threads: threads.max(1), detected: None })
     }

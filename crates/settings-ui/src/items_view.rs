@@ -5,7 +5,7 @@ use crate::items::{
     ItemsSession, LoginItem, MicLister, MicOption, LANGUAGES, RELEASES_URL, SOURCE_URL, VERSION,
 };
 use aloud_type_config::{
-    ConfigFile, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, VerticalPosition,
+    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State, VerticalPosition,
 };
 use iced::widget::{button, column, pick_list, row, text, toggler};
 use iced::Element;
@@ -34,6 +34,8 @@ pub enum ItemsMsg {
     Horizontal(Choice<HorizontalPosition>),
     Memory(Choice<ModelMemory>),
     Login(bool),
+    Gpu(Choice<Gpu>),
+    RetestGpu,
     OpenLink(&'static str),
 }
 
@@ -43,11 +45,15 @@ pub struct ItemsPanel<L: LoginItem, M: MicLister> {
 
 impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
     pub fn new(config: ConfigFile<Settings>, login: L, mics: M) -> Self {
-        Self { session: ItemsSession::new(config, PipeClient::default(), login, mics) }
+        // The state file sits next to the settings file; Settings only reads it.
+        let state = ConfigFile::<State>::open(config.path().with_file_name("state.toml"));
+        Self { session: ItemsSession::new(config, PipeClient::default(), login, mics).with_state(state) }
     }
 
     pub fn update(&mut self, m: ItemsMsg) {
         match m {
+            ItemsMsg::Gpu(c) => self.session.set_gpu(c.value),
+            ItemsMsg::RetestGpu => self.session.retest_gpu(),
             ItemsMsg::Microphone(c) => self.session.set_microphone(c.value),
             ItemsMsg::Language(c) => self.session.set_language(c.value),
             ItemsMsg::Style(c) => self.session.set_indicator_style(c.value),
@@ -60,6 +66,10 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
     }
 
     pub fn view(&self) -> Element<'_, ItemsMsg> {
+        let gpu_notice = self.session.gpu_notice();
+        let gpus: Vec<Choice<Gpu>> =
+            self.session.gpu_options().into_iter().map(|(value, label)| Choice { value, label }).collect();
+        let gpu_sel = gpus.iter().find(|c| c.value == self.session.settings().gpu).cloned();
         let s = self.session.settings();
         let mics: Vec<Choice<Option<String>>> =
             self.session.mic_options().into_iter().map(|MicOption { id, label }| Choice { value: id, label }).collect();
@@ -108,6 +118,10 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             .spacing(8),
             text("Speech model memory").size(18),
             pick_list(memories, mem_sel, ItemsMsg::Memory),
+            text("GPU").size(18),
+            row![pick_list(gpus, gpu_sel, ItemsMsg::Gpu), button(text("Re-test")).on_press(ItemsMsg::RetestGpu)]
+                .spacing(8),
+            text(gpu_notice.unwrap_or("")).size(14),
             toggler(self.session.launch_at_login()).label("Launch at login").on_toggle(ItemsMsg::Login),
             text(format!("Aloud Type {VERSION}")).size(14),
             row![

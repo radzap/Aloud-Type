@@ -4,7 +4,7 @@
 //! process is told to reload, so it applies without a restart.
 use crate::ipc::{Command, ResidentLink, Transport};
 use aloud_type_config::{
-    ConfigFile, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, VerticalPosition,
+    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State, VerticalPosition,
 };
 use std::io;
 
@@ -49,12 +49,52 @@ pub struct ItemsSession<T: Transport, L: LoginItem, M: MicLister> {
     link: ResidentLink<T>,
     login: L,
     mics: M,
+    /// Machine state (GPU probe results), read-only here; the resident process writes it.
+    state: Option<ConfigFile<State>>,
     error: Option<String>,
 }
 
 impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
     pub fn new(config: ConfigFile<Settings>, transport: T, login: L, mics: M) -> Self {
-        Self { config, link: ResidentLink::new(transport), login, mics, error: None }
+        Self { config, link: ResidentLink::new(transport), login, mics, state: None, error: None }
+    }
+
+    /// Give the session the state file so the GPU choices and error notice can be shown.
+    pub fn with_state(mut self, state: ConfigFile<State>) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Auto, CPU only, then every device a probe has seen (names from the state file).
+    pub fn gpu_options(&self) -> Vec<(Gpu, String)> {
+        let mut out = vec![(Gpu::Auto, "Auto".to_string()), (Gpu::CpuOnly, "CPU only".to_string())];
+        let mut names: Vec<String> = self
+            .state
+            .as_ref()
+            .map(|s| s.value().gpu_probes.keys().map(|k| k.split('|').next().unwrap_or(k).to_string()).collect())
+            .unwrap_or_default();
+        if let Gpu::Device(d) = &self.config.value().gpu {
+            names.push(d.clone());
+        }
+        names.sort();
+        names.dedup();
+        out.extend(names.into_iter().map(|n| (Gpu::Device(n.clone()), n)));
+        out
+    }
+
+    pub fn set_gpu(&mut self, gpu: Gpu) {
+        self.save(|s| s.gpu = gpu);
+    }
+
+    /// Shown in Settings when a backend error switched the GPU off for the session.
+    pub fn gpu_notice(&self) -> Option<&'static str> {
+        let st = self.state.as_ref()?;
+        st.value().gpu_disabled_after_error.then_some("GPU disabled after an error")
+    }
+
+    /// Re-test: the resident process forgets the error and saved results and probes again.
+    pub fn retest_gpu(&mut self) {
+        self.link.send(Command::RetestGpu);
     }
 
     pub fn settings(&self) -> &Settings {
@@ -283,6 +323,26 @@ mod tests {
         assert!(s.error().unwrap().contains("launch at login"));
         assert!(!reread(&p).launch_at_login);
         assert!(fake.log.borrow().is_empty());
+    }
+
+    #[test]
+    fn gpu_choices_error_notice_and_retest() {
+        let (s, fake, d, p) = session(Login::default());
+        let sp = d.path().join("state.toml");
+        let mut st = ConfigFile::<State>::open(&sp);
+        st.update(|x| {
+            x.gpu_probes.insert("RTX 4060|31.0.1".into(), aloud_type_config::GpuProbe { approved: true, speedup: 3.0 });
+            x.gpu_disabled_after_error = true;
+        })
+        .unwrap();
+        let mut s = s.with_state(ConfigFile::open(&sp));
+        let labels: Vec<_> = s.gpu_options().into_iter().map(|o| o.1).collect();
+        assert_eq!(labels, ["Auto", "CPU only", "RTX 4060"]);
+        assert_eq!(s.gpu_notice(), Some("GPU disabled after an error"));
+        s.set_gpu(Gpu::Device("RTX 4060".into()));
+        assert_eq!(reread(&p).gpu, Gpu::Device("RTX 4060".into()));
+        s.retest_gpu();
+        assert_eq!(fake.log.borrow().last().unwrap(), "retest-gpu");
     }
 
     #[test]
