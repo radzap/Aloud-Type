@@ -12,6 +12,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aloud-type-app"
+version = "0.1.0"
+dependencies = [
+ "aloud-type-config",
+ "aloud-type-core",
+ "aloud-type-platform-windows",
+ "aloud-type-recognizer",
+]
+
+[[package]]
 name = "aloud-type-config"
 version = "0.1.0"
 dependencies = [
