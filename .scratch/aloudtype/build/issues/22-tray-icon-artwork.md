@@ -6,6 +6,10 @@
 
 **Status:** ready-for-human
 
-- [ ] Three states exist at all tray sizes and read clearly on light and dark taskbars
-- [ ] The licence terms of the generation tool allow commercial use (confirmed)
-- [ ] Final assets are handed over for the tray ticket to adopt
+- [x] Three states exist at all tray sizes and read clearly on light and dark taskbars
+- [x] The licence terms of the generation tool allow commercial use (confirmed)
+- [x] Final assets are handed over for the tray ticket to adopt
+
+## Comments
+
+Done from the supplied `docs/logo.svg` instead of a fresh generation. The logo's thin bubble outline and seven bars do not survive 16 px, so the tray glyph is a five-bar redraw on a 16 unit grid. Assets, the generator (`tools/icons`) and the light/dark selection note are in `assets/icons/` (see its README); `assets/icons/preview-tray.png` is the light and dark taskbar check. The tray ticket (12) adopts `assets/icons/tray/*.ico` and `app.ico`.

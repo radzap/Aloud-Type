@@ -1,0 +1,8 @@
+{
+  "name": "aloudtype-icons",
+  "private": true,
+  "type": "module",
+  "description": "Regenerates the tray and app icons in assets/icons from docs/logo.svg",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": { "@resvg/resvg-js": "2.6.2" }
+}
