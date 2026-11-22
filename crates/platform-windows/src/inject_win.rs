@@ -2,6 +2,7 @@
 //! (never the clipboard), events tagged with `INJECT_TAG` so the app's own
 //! hook ignores them; and the foreground-elevation probe.
 use crate::classify::INJECT_TAG;
+use crate::win32::{GetForegroundWindow, GetWindowThreadProcessId};
 use crate::inject::{ElevationProbe, InputBackend, Key, KeyEv};
 
 const INPUT_KEYBOARD: u32 = 1;
@@ -30,8 +31,6 @@ struct Input {
 #[link(name = "user32")]
 extern "system" {
     fn SendInput(n: u32, inputs: *const Input, size: i32) -> u32;
-    fn GetForegroundWindow() -> isize;
-    fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
 }
 #[link(name = "kernel32")]
 extern "system" {

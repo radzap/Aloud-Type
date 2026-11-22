@@ -16,6 +16,8 @@ pub mod pipe_server;
 pub mod power_win;
 #[cfg(windows)]
 pub mod tray;
+#[cfg(windows)]
+pub mod win32;
 pub mod settings_launcher;
 #[cfg(windows)]
 pub mod overlay;

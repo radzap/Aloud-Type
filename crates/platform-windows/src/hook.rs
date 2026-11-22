@@ -1,6 +1,7 @@
 //! `WH_KEYBOARD_LL` hook on its own thread. The callback only classifies
 //! (see `classify`), swallows or passes, and posts to channels; injection of
 //! the chord replay runs on a separate worker so the callback never blocks.
+use crate::win32::{GetMessageW, Msg};
 use crate::hook_health::HookHealth;
 use crate::classify::{should_reinstall, Classifier, Inject, RawKey, INJECT_TAG, VK_RCONTROL};
 use aloud_type_core::{KeyEvent, Keyboard};
@@ -42,23 +43,12 @@ struct Input {
     ki: KeybdInput,
     _pad: [usize; 1], // INPUT's union is sized by MOUSEINPUT
 }
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: isize,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: [i32; 2],
-}
 
 #[link(name = "user32")]
 extern "system" {
     fn SetWindowsHookExW(id: i32, f: unsafe extern "system" fn(i32, usize, isize) -> isize, module: isize, thread: u32) -> Hhook;
     fn UnhookWindowsHookEx(h: Hhook) -> i32;
     fn CallNextHookEx(h: Hhook, code: i32, w: usize, l: isize) -> isize;
-    fn GetMessageW(m: *mut Msg, hwnd: isize, min: u32, max: u32) -> i32;
     fn SetTimer(hwnd: isize, id: usize, ms: u32, f: usize) -> usize;
     fn PostThreadMessageW(thread: u32, msg: u32, w: usize, l: isize) -> i32;
     fn SendInput(n: u32, inputs: *const Input, size: i32) -> u32;

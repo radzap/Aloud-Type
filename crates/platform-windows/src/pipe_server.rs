@@ -6,7 +6,7 @@ use std::io;
 type Handle = isize;
 const INVALID_HANDLE_VALUE: Handle = -1;
 const PIPE_ACCESS_DUPLEX: u32 = 3;
-const PIPE_TYPE_BYTE_WAIT_REJECT_REMOTE: u32 = 0x0 | 0x0 | 0x8;
+const PIPE_TYPE_BYTE_WAIT_REJECT_REMOTE: u32 = 0x8;
 const ERROR_PIPE_CONNECTED: i32 = 535;
 
 #[link(name = "kernel32")]

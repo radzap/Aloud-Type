@@ -18,7 +18,7 @@ pub fn map_power_broadcast(wparam: usize) -> Option<PowerEvent> {
     }
 }
 
-type Hwnd = isize;
+use crate::win32::{DispatchMessageW, GetMessageW, Hwnd, Msg};
 #[repr(C)]
 struct WndClassW {
     style: u32,
@@ -31,16 +31,6 @@ struct WndClassW {
     background: isize,
     menu: *const u16,
     class_name: *const u16,
-}
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: isize,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: [i32; 2],
 }
 #[link(name = "user32")]
 extern "system" {
@@ -60,8 +50,6 @@ extern "system" {
         param: *const u8,
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
-    fn GetMessageW(m: *mut Msg, h: Hwnd, a: u32, b: u32) -> i32;
-    fn DispatchMessageW(m: *const Msg) -> isize;
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
 }
 #[link(name = "kernel32")]

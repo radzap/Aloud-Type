@@ -515,7 +515,7 @@ pub fn decode_wav(b: &[u8]) -> Option<Vec<f32>> {
         if &b[i..i + 4] == b"data" {
             let end = (i + 8 + len).min(b.len());
             return Some(
-                b[i + 8..end].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect(),
+                b[i + 8..end].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect(),
             );
         }
         i += 8 + len + (len & 1);

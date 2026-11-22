@@ -43,7 +43,7 @@ fn rig(script: Vec<&str>) -> Rig {
         sink: Box::new(typed.clone()),
         start_gate: Box::new(gate.clone()),
         typing_faults: Box::new(typed.clone()),
-        settings: Box::new(|| DictationSettings::default()),
+        settings: Box::new(DictationSettings::default),
         config: ControllerConfig { chunk_ms: CHUNK_MS, hangover_ms: 1000 },
     });
     Rig { c, kb, clock, cap, typed, gate }

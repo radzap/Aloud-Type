@@ -128,7 +128,7 @@ fn a_saved_approval_for_the_same_device_and_driver_is_reused_without_a_new_probe
     let mut st = State::default();
     let d = dev("Radeon 780M", "31.0.1");
     record_verdict(&mut st, &d, &ok_verdict());
-    assert_eq!(select(&Gpu::Auto, &st, &[d.clone()]), Selection::Gpu(d));
+    assert_eq!(select(&Gpu::Auto, &st, std::slice::from_ref(&d)), Selection::Gpu(d));
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn a_new_driver_version_is_probed_again() {
     let mut st = State::default();
     record_verdict(&mut st, &dev("Radeon 780M", "31.0.1"), &ok_verdict());
     let upgraded = dev("Radeon 780M", "32.0.0");
-    assert_eq!(select(&Gpu::Auto, &st, &[upgraded.clone()]), Selection::NeedsProbe(vec![upgraded]));
+    assert_eq!(select(&Gpu::Auto, &st, std::slice::from_ref(&upgraded)), Selection::NeedsProbe(vec![upgraded]));
 }
 
 #[test]
@@ -165,11 +165,11 @@ fn a_gpu_disabled_after_an_error_stays_on_cpu_until_retested() {
     record_verdict(&mut st, &d, &ok_verdict());
     record_gpu_error(&mut st);
     assert!(st.gpu_disabled_after_error);
-    assert_eq!(select(&Gpu::Auto, &st, &[d.clone()]), Selection::Cpu(CpuReason::DisabledAfterError));
+    assert_eq!(select(&Gpu::Auto, &st, std::slice::from_ref(&d)), Selection::Cpu(CpuReason::DisabledAfterError));
     // Re-test from Settings clears the flag and the saved results, so the next start probes again.
     request_retest(&mut st);
     assert!(!st.gpu_disabled_after_error);
-    assert_eq!(select(&Gpu::Auto, &st, &[d.clone()]), Selection::NeedsProbe(vec![d]));
+    assert_eq!(select(&Gpu::Auto, &st, std::slice::from_ref(&d)), Selection::NeedsProbe(vec![d]));
 }
 
 #[test]

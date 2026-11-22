@@ -31,7 +31,7 @@ fn wav() -> Vec<f32> {
     while i + 8 <= b.len() {
         let len = u32::from_le_bytes(b[i + 4..i + 8].try_into().unwrap()) as usize;
         if &b[i..i + 4] == b"data" {
-            return b[i + 8..i + 8 + len].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect();
+            return b[i + 8..i + 8 + len].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect();
         }
         i += 8 + len;
     }

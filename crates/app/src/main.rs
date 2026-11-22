@@ -314,7 +314,7 @@ mod host {
         if let Err(e) = tray::run(tray_handle, cmd_tx, startup, initial) {
             eprintln!("Tray failed: {e}");
         }
-        drop(guard);
+
         std::process::exit(0);
     }
 

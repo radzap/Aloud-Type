@@ -31,7 +31,7 @@ impl Feed {
         let stale = s
             .resampler
             .as_ref()
-            .map_or(true, |r| r.input_rate() != sample_rate || r.channels() != channels);
+            .is_none_or(|r| r.input_rate() != sample_rate || r.channels() != channels);
         if stale {
             s.resampler = Some(Resampler::new(sample_rate, channels));
         }

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
-type Hwnd = isize;
+use crate::win32::{DispatchMessageW, GetForegroundWindow, GetMessageW, Hwnd, Msg, Point, ShowWindow, TranslateMessage};
 
 const WM_DESTROY: u32 = 0x0002;
 const WM_CLOSE: u32 = 0x0010;
@@ -42,25 +42,9 @@ const SM_CYSCREEN: i32 = 1;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
 struct Size {
     cx: i32,
     cy: i32,
-}
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: Hwnd,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: Point,
 }
 #[repr(C)]
 struct WndClassW {
@@ -115,7 +99,6 @@ struct BitmapInfo {
 }
 
 #[link(name = "user32")]
-#[allow(clashing_extern_declarations)]
 extern "system" {
     fn RegisterClassW(c: *const WndClassW) -> u16;
     fn CreateWindowExW(
@@ -124,16 +107,11 @@ extern "system" {
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
-    fn GetMessageW(m: *mut Msg, h: Hwnd, min: u32, max: u32) -> i32;
-    fn TranslateMessage(m: *const Msg) -> i32;
-    fn DispatchMessageW(m: *const Msg) -> isize;
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
-    fn ShowWindow(h: Hwnd, cmd: i32) -> i32;
     fn SetTimer(h: Hwnd, id: usize, ms: u32, f: usize) -> usize;
     fn KillTimer(h: Hwnd, id: usize) -> i32;
     fn GetSystemMetrics(i: i32) -> i32;
-    fn GetForegroundWindow() -> Hwnd;
     fn MonitorFromWindow(h: Hwnd, flags: u32) -> isize;
     fn GetMonitorInfoW(m: isize, info: *mut MonitorInfo) -> i32;
     fn GetDC(h: Hwnd) -> isize;
@@ -487,13 +465,13 @@ pub fn spawn(placement: Placement) -> std::io::Result<OverlayHandle> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::win32::IsWindowVisible;
     use aloud_type_core::listening::FaultReason;
     use std::time::Duration;
 
     #[link(name = "user32")]
     extern "system" {
         fn GetWindowLongW(h: Hwnd, index: i32) -> i32;
-        fn IsWindowVisible(h: Hwnd) -> i32;
         fn SendMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
         fn GetWindowRect(h: Hwnd, r: *mut WinRect) -> i32;
     }

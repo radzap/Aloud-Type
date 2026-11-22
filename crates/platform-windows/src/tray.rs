@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-type Hwnd = isize;
+use crate::win32::{DispatchMessageW, GetMessageW, Hwnd, Msg, Point, SetForegroundWindow, ShowWindow, TranslateMessage};
 
 const WM_DESTROY: u32 = 0x0002;
 const WM_CLOSE: u32 = 0x0010;
@@ -56,22 +56,6 @@ const NOTICE_TIMER: usize = 1;
 const NOTICE_W: i32 = 440;
 const NOTICE_H: i32 = 56;
 
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: Hwnd,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: Point,
-}
 #[repr(C)]
 struct WndClassW {
     style: u32,
@@ -130,7 +114,6 @@ struct PaintStruct {
 }
 
 #[link(name = "user32")]
-#[allow(clashing_extern_declarations)]
 extern "system" {
     fn RegisterClassW(c: *const WndClassW) -> u16;
     fn CreateWindowExW(
@@ -139,9 +122,6 @@ extern "system" {
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
-    fn GetMessageW(m: *mut Msg, h: Hwnd, min: u32, max: u32) -> i32;
-    fn TranslateMessage(m: *const Msg) -> i32;
-    fn DispatchMessageW(m: *const Msg) -> isize;
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
     fn RegisterWindowMessageW(name: *const u16) -> u32;
@@ -152,8 +132,6 @@ extern "system" {
     fn TrackPopupMenu(m: isize, flags: u32, x: i32, y: i32, r: i32, h: Hwnd, rect: *const Rect) -> i32;
     fn DestroyMenu(m: isize) -> i32;
     fn GetCursorPos(p: *mut Point) -> i32;
-    fn SetForegroundWindow(h: Hwnd) -> i32;
-    fn ShowWindow(h: Hwnd, cmd: i32) -> i32;
     fn SetTimer(h: Hwnd, id: usize, ms: u32, f: usize) -> usize;
     fn KillTimer(h: Hwnd, id: usize) -> i32;
     fn SetLayeredWindowAttributes(h: Hwnd, key: u32, alpha: u8, flags: u32) -> i32;
@@ -278,7 +256,7 @@ fn icon_index(k: IconKind) -> usize {
 fn make_icon(kind: IconKind) -> isize {
     const SIZE: usize = 32;
     let color = placeholder_icon_bgra(kind, SIZE);
-    let mask = vec![0u8; SIZE * SIZE / 8];
+    let mask = [0u8; SIZE * SIZE / 8];
     unsafe {
         let hc = CreateBitmap(SIZE as i32, SIZE as i32, 1, 32, color.as_ptr());
         let hm = CreateBitmap(SIZE as i32, SIZE as i32, 1, 1, mask.as_ptr());

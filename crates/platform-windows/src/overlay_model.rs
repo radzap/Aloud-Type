@@ -492,7 +492,7 @@ fn fill_rrect(px: &mut [u32], w: usize, h: usize, rect: (f32, f32, f32, f32), r:
     }
 }
 
-fn fill_circle(px: &mut [u32], w: usize, h: usize, cx: f32, cy: f32, r: f32, c: [f32; 3], alpha: f32) {
+fn fill_circle(px: &mut [u32], w: usize, h: usize, (cx, cy, r): (f32, f32, f32), c: [f32; 3], alpha: f32) {
     fill_rrect(px, w, h, (cx - r, cy - r, 2.0 * r, 2.0 * r), r, c, alpha);
 }
 
@@ -548,10 +548,10 @@ pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
             if f.look.tone == Tone::Neutral {
                 // Halo grows with loudness; the inner disc stays steady.
                 let v = f.level.clamp(0.0, 1.0);
-                fill_circle(&mut px, w, h, cx, cy, r0 + v * (d / 2.0 - r0), [80.0, 140.0, 255.0], 0.25 + v * 0.35);
-                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [20.0, 20.0, 24.0], 0.9);
+                fill_circle(&mut px, w, h, (cx, cy, r0 + v * (d / 2.0 - r0)), [80.0, 140.0, 255.0], 0.25 + v * 0.35);
+                fill_circle(&mut px, w, h, (cx, cy, r0 * 1.15), [20.0, 20.0, 24.0], 0.9);
             } else {
-                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [0.0; 3], 0.18);
+                fill_circle(&mut px, w, h, (cx, cy, r0 * 1.15), [0.0; 3], 0.18);
             }
         }
     }
@@ -562,11 +562,11 @@ fn render_trace(px: &mut [u32], w: usize, h: usize, f: &Frame, scale: f32) {
     // Canvas inset 8 x 3 logical pixels, bars grow from the middle row.
     let (padx, pady) = ((8.0 * scale).round() as usize, (3.0 * scale).round() as usize);
     let (cw, ch) = (w.saturating_sub(2 * padx), h.saturating_sub(2 * pady));
-    for i in 0..TRACE_LEN {
+    for (i, &level) in f.trace.iter().enumerate().take(TRACE_LEN) {
         let x0 = padx + i * cw / TRACE_LEN;
         let x1 = padx + (i + 1) * cw / TRACE_LEN;
         let x1 = if x1 - x0 > 1 { x1 - 1 } else { x1 };
-        let bh = (f.trace[i].clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
+        let bh = (level.clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
         let top = (pady as f32 + (ch as f32 - bh) / 2.0).round() as usize;
         let bot = ((pady as f32 + (ch as f32 + bh) / 2.0).round() as usize).min(h);
         let a = 0.35 + 0.65 * (i as f32 / TRACE_LEN as f32);
