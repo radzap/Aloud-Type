@@ -16,11 +16,12 @@ path = "src/main.rs"
 [dependencies]
 aloud-type-core.workspace = true
 aloud-type-config = { path = "../config" }
+aloud-type-models = { path = "../models" }
 
 [target.'cfg(windows)'.dependencies]
 aloud-type-platform-windows = { path = "../platform-windows" }
 aloud-type-recognizer = { path = "../recognizer" }
-aloud-type-models = { path = "../models" }
 
 [dev-dependencies]
 aloud-type-recognizer = { path = "../recognizer" }
+tempfile = "3"

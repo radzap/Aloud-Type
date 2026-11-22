@@ -12,26 +12,39 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 fn model(name: &str) -> Option<PathBuf> {
-    let dir = std::env::var("ALOUDTYPE_MODEL_DIR").map(PathBuf::from).unwrap_or_else(|_| {
-        PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into())).join("AloudTypeDev").join("models")
-    });
+    let dir = std::env::var("ALOUDTYPE_MODEL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".into()))
+                .join("AloudTypeDev")
+                .join("models")
+        });
     let p = dir.join(name);
     if p.exists() {
         return Some(p);
     }
-    assert!(std::env::var("ALOUDTYPE_REQUIRE_MODELS").is_err(), "required model {name} missing");
+    assert!(
+        std::env::var("ALOUDTYPE_REQUIRE_MODELS").is_err(),
+        "required model {name} missing"
+    );
     eprintln!("SKIP: model {name} not found in {}", dir.display());
     None
 }
 
 fn wav() -> Vec<f32> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../recognizer/tests/fixtures/jfk.wav");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../recognizer/tests/fixtures/jfk.wav");
     let b = std::fs::read(path).expect("fixture");
     let mut i = 12;
     while i + 8 <= b.len() {
         let len = u32::from_le_bytes(b[i + 4..i + 8].try_into().unwrap()) as usize;
         if &b[i..i + 4] == b"data" {
-            return b[i + 8..i + 8 + len].chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect();
+            return b[i + 8..i + 8 + len]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+                .collect();
         }
         i += 8 + len;
     }
@@ -40,7 +53,12 @@ fn wav() -> Vec<f32> {
 
 fn norm(s: &str) -> String {
     s.split_whitespace()
-        .map(|w| w.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase())
+        .map(|w| {
+            w.chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
@@ -51,19 +69,32 @@ const EXPECTED: &str =
 
 #[test]
 fn holding_the_key_while_the_jfk_clip_plays_types_it_streaming_and_flushes_on_release() {
-    let (Some(m), Some(v)) = (model(pins::BASE_MODEL_FILE), model(pins::VAD_MODEL_FILE)) else { return };
-    let (kb, clock, cap, sink) = (FakeKeyboard::new(), FakeClock::new(), FakeCapture::default(), FakeSink::default());
+    let (Some(m), Some(v)) = (model(pins::BASE_MODEL_FILE), model(pins::VAD_MODEL_FILE)) else {
+        return;
+    };
+    let (kb, clock, cap, sink) = (
+        FakeKeyboard::new(),
+        FakeClock::new(),
+        FakeCapture::default(),
+        FakeSink::default(),
+    );
     let mut c = Controller::new(Parts {
         keyboard: kb.clone(),
         clock: clock.clone(),
-        lifecycle: LifecycleConfig { modifier_key: true, ..Default::default() },
+        lifecycle: LifecycleConfig {
+            modifier_key: true,
+            ..Default::default()
+        },
         capture: Box::new(cap.clone()),
         recognizer: Box::new(WhisperRecognizer::load(&m).expect("load model")),
         voice_gate: Box::new(SileroVoiceGate::load(&v).expect("load vad")),
         sink: Box::new(sink.clone()),
         start_gate: Box::new(FakeStartGate::default()),
         typing_faults: Box::new(sink.clone()),
-        settings: Box::new(|| DictationSettings { language: "en".into(), microphone: Mic::SystemDefault }),
+        settings: Box::new(|| DictationSettings {
+            language: "en".into(),
+            microphone: Mic::SystemDefault,
+        }),
         config: ControllerConfig::default(),
     });
 
@@ -84,7 +115,10 @@ fn holding_the_key_while_the_jfk_clip_plays_types_it_streaming_and_flushes_on_re
         }
     }
     let before_release = sink.text();
-    assert!(!before_release.is_empty(), "words were typed while the key was still held");
+    assert!(
+        !before_release.is_empty(),
+        "words were typed while the key was still held"
+    );
     assert!(!before_release.starts_with(' '));
 
     let release_at = Instant::now();
@@ -94,7 +128,10 @@ fn holding_the_key_while_the_jfk_clip_plays_types_it_streaming_and_flushes_on_re
 
     let typed = sink.text();
     assert_eq!(norm(&typed), EXPECTED);
-    assert!(!typed.starts_with(' ') && !typed.ends_with(' '), "no stray spaces: {typed:?}");
+    assert!(
+        !typed.starts_with(' ') && !typed.ends_with(' '),
+        "no stray spaces: {typed:?}"
+    );
     assert!(!typed.contains("  "), "single spaces: {typed:?}");
     assert!(!cap.is_open());
     assert_eq!(c.indicator(), Indicator::Hidden);

@@ -67,8 +67,14 @@ impl WhisperRecognizer {
 
     /// Load on the GPU backend device `gpu_device` (CPU when `None`). Without the `vulkan`
     /// feature there is no GPU backend and a GPU load is an error.
-    pub fn load_on(model: &Path, threads: usize, gpu_device: Option<i32>) -> Result<Self, RecognizerError> {
-        let path = model.to_str().ok_or_else(|| RecognizerError("non-UTF-8 model path".into()))?;
+    pub fn load_on(
+        model: &Path,
+        threads: usize,
+        gpu_device: Option<i32>,
+    ) -> Result<Self, RecognizerError> {
+        let path = model
+            .to_str()
+            .ok_or_else(|| RecognizerError("non-UTF-8 model path".into()))?;
         if gpu_device.is_some() && !cfg!(feature = "vulkan") {
             return Err(RecognizerError("this build has no GPU backend".into()));
         }
@@ -77,9 +83,15 @@ impl WhisperRecognizer {
         if let Some(d) = gpu_device {
             params.gpu_device(d);
         }
-        let ctx = WhisperContext::new_with_params(path, params).map_err(|e| err("load model", e))?;
+        let ctx =
+            WhisperContext::new_with_params(path, params).map_err(|e| err("load model", e))?;
         let state = ctx.create_state().map_err(|e| err("create state", e))?;
-        Ok(Self { _ctx: ctx, state, threads: threads.max(1), detected: None })
+        Ok(Self {
+            _ctx: ctx,
+            state,
+            threads: threads.max(1),
+            detected: None,
+        })
     }
 
     pub fn threads(&self) -> usize {
@@ -99,7 +111,11 @@ impl WhisperRecognizer {
     ) -> Result<Vec<Segment>, RecognizerError> {
         let mut p = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         p.set_n_threads(self.threads as i32);
-        p.set_language(Some(if language.is_empty() { "auto" } else { language }));
+        p.set_language(Some(if language.is_empty() {
+            "auto"
+        } else {
+            language
+        }));
         p.set_token_timestamps(true);
         p.set_no_context(true);
         p.set_print_special(false);
@@ -117,7 +133,9 @@ impl WhisperRecognizer {
             let mut words: Vec<Word> = Vec::new();
             let mut continuing = false;
             for i in 0..seg.n_tokens() {
-                let Some(tok) = seg.get_token(i) else { continue };
+                let Some(tok) = seg.get_token(i) else {
+                    continue;
+                };
                 let text = tok.to_str_lossy().map_err(|e| err("token text", e))?;
                 // Special tokens (<|...|>, [_TT_..]) carry no words.
                 if text.starts_with("[_") || text.starts_with("<|") {
@@ -132,7 +150,12 @@ impl WhisperRecognizer {
                     w.end_ms = e.max(w.end_ms);
                     w.confidence = w.confidence.min(p); // a word is as sure as its weakest piece
                 } else if !text.trim().is_empty() {
-                    words.push(Word { text: text.trim_start().to_string(), start_ms: s, end_ms: e.max(s), confidence: p });
+                    words.push(Word {
+                        text: text.trim_start().to_string(),
+                        start_ms: s,
+                        end_ms: e.max(s),
+                        confidence: p,
+                    });
                     continuing = true;
                 } else {
                     continuing = false;
@@ -140,7 +163,11 @@ impl WhisperRecognizer {
             }
             // Punctuation-only tokens attach to the previous word via the branch above.
             out.push(Segment {
-                text: seg.to_str_lossy().map_err(|e| err("segment text", e))?.trim().to_string(),
+                text: seg
+                    .to_str_lossy()
+                    .map_err(|e| err("segment text", e))?
+                    .trim()
+                    .to_string(),
                 words,
                 no_speech_prob: seg.no_speech_probability(),
             });
@@ -152,10 +179,11 @@ impl WhisperRecognizer {
 impl Recognizer for WhisperRecognizer {
     /// Errors are logged and yield no segments; use [`WhisperRecognizer::try_recognize`] to see them.
     fn recognize(&mut self, audio: &[f32], language: &str, prompt: Option<&str>) -> Vec<Segment> {
-        self.try_recognize(audio, language, prompt).unwrap_or_else(|e| {
-            eprintln!("recognizer: {e}");
-            Vec::new()
-        })
+        self.try_recognize(audio, language, prompt)
+            .unwrap_or_else(|e| {
+                eprintln!("recognizer: {e}");
+                Vec::new()
+            })
     }
 }
 
@@ -166,7 +194,9 @@ pub struct SileroVoiceGate {
 
 impl SileroVoiceGate {
     pub fn load(model: &Path) -> Result<Self, RecognizerError> {
-        let path = model.to_str().ok_or_else(|| RecognizerError("non-UTF-8 model path".into()))?;
+        let path = model
+            .to_str()
+            .ok_or_else(|| RecognizerError("non-UTF-8 model path".into()))?;
         let mut p = WhisperVadContextParams::new();
         p.set_n_threads(1);
         p.set_use_gpu(false);
@@ -180,7 +210,10 @@ impl VoiceGate for SileroVoiceGate {
         if audio.is_empty() {
             return false;
         }
-        match self.ctx.segments_from_samples(WhisperVadParams::new(), audio) {
+        match self
+            .ctx
+            .segments_from_samples(WhisperVadParams::new(), audio)
+        {
             Ok(s) => s.num_segments() > 0,
             Err(e) => {
                 eprintln!("voice gate: {e}");
@@ -196,7 +229,10 @@ mod tests {
 
     #[test]
     fn decode_threads_is_cores_minus_one_between_one_and_four() {
-        let got: Vec<_> = [1, 2, 3, 4, 5, 6, 8, 16].iter().map(|&c| decode_threads(c)).collect();
+        let got: Vec<_> = [1, 2, 3, 4, 5, 6, 8, 16]
+            .iter()
+            .map(|&c| decode_threads(c))
+            .collect();
         assert_eq!(got, [1, 1, 2, 3, 4, 4, 4, 4]);
     }
 }

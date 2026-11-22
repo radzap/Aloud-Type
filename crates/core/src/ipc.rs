@@ -68,7 +68,11 @@ mod tests {
 
     #[test]
     fn commands_round_trip() {
-        for c in [Command::SuspendKeys, Command::ResumeKeys, Command::ReloadSettings] {
+        for c in [
+            Command::SuspendKeys,
+            Command::ResumeKeys,
+            Command::ReloadSettings,
+        ] {
             assert_eq!(Command::decode(c.encode()), Some(c));
         }
         assert_eq!(Command::decode("bogus"), None);
@@ -77,8 +81,14 @@ mod tests {
     #[test]
     fn valid_commands_are_applied_and_acknowledged() {
         let mut c = Connection::default();
-        assert_eq!(c.handle("suspend-keys\n"), (Some(Command::SuspendKeys), "ok"));
-        assert_eq!(c.handle("reload-settings"), (Some(Command::ReloadSettings), "ok"));
+        assert_eq!(
+            c.handle("suspend-keys\n"),
+            (Some(Command::SuspendKeys), "ok")
+        );
+        assert_eq!(
+            c.handle("reload-settings"),
+            (Some(Command::ReloadSettings), "ok")
+        );
     }
 
     #[test]

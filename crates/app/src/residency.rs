@@ -12,6 +12,7 @@ pub type Model = Box<dyn Recognizer + Send>;
 /// Loads the Speech model with the given id (runs on a worker thread).
 pub type Loader = Arc<dyn Fn(&str) -> Result<Model, String> + Send + Sync>;
 pub type NowFn = Arc<dyn Fn() -> Millis + Send + Sync>;
+pub type Waker = Arc<dyn Fn() + Send + Sync>;
 
 struct State {
     wanted: String,
@@ -26,6 +27,7 @@ struct State {
     last_activity: Millis,
     notices: Vec<String>,
     load_failed: bool,
+    waker: Option<Waker>,
 }
 
 struct Inner {
@@ -55,6 +57,7 @@ impl Residency {
                 last_activity: t,
                 notices: vec![],
                 load_failed: false,
+                waker: None,
             }),
             loaded: Condvar::new(),
             loader,
@@ -87,16 +90,24 @@ impl Residency {
                     Ok(m) => st.staged = Some((id, m)),
                     Err(e) => {
                         if let Some((cur, _)) = &st.model {
-                            let msg = format!("Could not load Speech model \"{id}\" ({e}); keeping \"{cur}\"");
+                            let msg = format!(
+                                "Could not load Speech model \"{id}\" ({e}); keeping \"{cur}\""
+                            );
                             st.notices.push(msg);
                         } else {
                             st.load_failed = true;
-                            st.notices.push(format!("Could not load Speech model \"{id}\": {e}"));
+                            st.notices
+                                .push(format!("Could not load Speech model \"{id}\": {e}"));
                         }
                     }
                 }
             }
+            let waker = st.waker.clone();
+            drop(st);
             me.0.loaded.notify_all();
+            if let Some(w) = waker {
+                w();
+            }
         });
     }
 
@@ -137,6 +148,21 @@ impl Residency {
         {
             st.model = None;
         }
+    }
+
+    /// Time until the model is freed for being idle, if that is pending.
+    pub fn idle_unload_in(&self) -> Option<Millis> {
+        let st = self.lock();
+        if st.memory != ModelMemory::UnloadWhenIdle || st.dictating || st.model.is_none() {
+            return None;
+        }
+        Some(IDLE_UNLOAD_MS.saturating_sub((self.0.now)().saturating_sub(st.last_activity)))
+    }
+
+    /// Called (from the loading thread) whenever a load finishes, so a sleeping
+    /// host can pick up the model, a staged swap or a notice.
+    pub fn set_waker(&self, waker: Waker) {
+        self.lock().waker = Some(waker);
     }
 
     /// Change the residency mode; takes effect immediately.
@@ -239,7 +265,11 @@ mod tests {
     struct Named(String);
     impl Recognizer for Named {
         fn recognize(&mut self, _: &[f32], _: &str, _: Option<&str>) -> Vec<Segment> {
-            vec![Segment { text: self.0.clone(), words: vec![], no_speech_prob: 0.0 }]
+            vec![Segment {
+                text: self.0.clone(),
+                words: vec![],
+                no_speech_prob: 0.0,
+            }]
         }
     }
 
@@ -267,7 +297,12 @@ mod tests {
 
     impl Rig {
         fn new() -> Self {
-            Rig { clock: Default::default(), loads: Default::default(), gates: Default::default(), failing: Default::default() }
+            Rig {
+                clock: Default::default(),
+                loads: Default::default(),
+                gates: Default::default(),
+                failing: Default::default(),
+            }
         }
         fn hold(&self, id: &str) -> Gate {
             let g = Gate::default();
@@ -275,7 +310,8 @@ mod tests {
             g
         }
         fn loader(&self) -> Loader {
-            let (loads, gates, failing) = (self.loads.clone(), self.gates.clone(), self.failing.clone());
+            let (loads, gates, failing) =
+                (self.loads.clone(), self.gates.clone(), self.failing.clone());
             Arc::new(move |id| {
                 loads.lock().unwrap().push(id.to_string());
                 let gate = gates.lock().unwrap().get(id).cloned();
@@ -290,7 +326,12 @@ mod tests {
         }
         fn residency(&self, id: &str, memory: ModelMemory) -> Residency {
             let c = self.clock.clone();
-            Residency::start(self.loader(), Arc::new(move || c.load(Ordering::SeqCst)), id, memory)
+            Residency::start(
+                self.loader(),
+                Arc::new(move || c.load(Ordering::SeqCst)),
+                id,
+                memory,
+            )
         }
         fn advance(&self, ms: u64) {
             self.clock.fetch_add(ms, Ordering::SeqCst);
@@ -303,7 +344,10 @@ mod tests {
     fn eventually(mut f: impl FnMut() -> bool) {
         let t = Instant::now();
         while !f() {
-            assert!(t.elapsed() < Duration::from_secs(5), "condition not reached");
+            assert!(
+                t.elapsed() < Duration::from_secs(5),
+                "condition not reached"
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
     }
@@ -322,7 +366,10 @@ mod tests {
         let (d, r2) = (done.clone(), r.clone());
         let t = std::thread::spawn(move || *d.lock().unwrap() = Some(said(&r2)));
         std::thread::sleep(Duration::from_millis(50));
-        assert!(done.lock().unwrap().is_none(), "must wait, not skip, while the model loads");
+        assert!(
+            done.lock().unwrap().is_none(),
+            "must wait, not skip, while the model loads"
+        );
         gate.open();
         t.join().unwrap();
         assert_eq!(done.lock().unwrap().as_deref(), Some("base"));
@@ -368,6 +415,40 @@ mod tests {
         eventually(|| r.loaded_model().is_some()); // loaded with no decode requested
         assert_eq!(rig.load_count(), 2);
         assert_eq!(said(&r), "base");
+    }
+
+    #[test]
+    fn the_unload_deadline_is_known_only_when_one_is_pending() {
+        let rig = Rig::new();
+        let r = rig.residency("base", ModelMemory::UnloadWhenIdle);
+        eventually(|| r.loaded_model().is_some());
+        assert_eq!(r.idle_unload_in(), Some(IDLE_UNLOAD_MS));
+        rig.advance(1000);
+        assert_eq!(r.idle_unload_in(), Some(IDLE_UNLOAD_MS - 1000));
+        r.dictation_started();
+        assert_eq!(r.idle_unload_in(), None, "never during a Dictation");
+        r.dictation_ended();
+        assert_eq!(r.idle_unload_in(), Some(IDLE_UNLOAD_MS));
+        r.set_memory(ModelMemory::KeepLoaded);
+        assert_eq!(r.idle_unload_in(), None);
+        r.set_memory(ModelMemory::UnloadWhenIdle);
+        rig.advance(IDLE_UNLOAD_MS);
+        r.tick();
+        assert_eq!(r.idle_unload_in(), None, "already unloaded");
+    }
+
+    #[test]
+    fn the_waker_is_called_when_a_load_finishes() {
+        let rig = Rig::new();
+        let gate = rig.hold("base");
+        let r = rig.residency("base", ModelMemory::KeepLoaded);
+        let woken = Arc::new(AtomicU64::new(0));
+        let w = woken.clone();
+        r.set_waker(Arc::new(move || {
+            w.fetch_add(1, Ordering::SeqCst);
+        }));
+        gate.open();
+        eventually(|| woken.load(Ordering::SeqCst) > 0);
     }
 
     #[test]
@@ -436,7 +517,11 @@ mod tests {
         rig.advance(IDLE_UNLOAD_MS);
         r.tick();
         r.request_model("small");
-        assert_eq!(rig.load_count(), 1, "nothing is loaded just to swap an unloaded model");
+        assert_eq!(
+            rig.load_count(),
+            1,
+            "nothing is loaded just to swap an unloaded model"
+        );
         r.dictation_started();
         assert_eq!(said(&r), "small");
     }

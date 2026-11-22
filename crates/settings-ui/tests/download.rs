@@ -72,7 +72,11 @@ fn handle(mut s: TcpStream, mode: Mode, ranges: &Mutex<Vec<u64>>) -> std::io::Re
         ),
         _ => ("200 OK", &data[..], String::new()),
     };
-    write!(s, "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n", body.len())?;
+    write!(
+        s,
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+        body.len()
+    )?;
     let n = match mode {
         Mode::CutAfter(n) => n.min(body.len()),
         _ => body.len(),
@@ -95,7 +99,9 @@ fn model(url: &str, sha: &'static str) -> ModelInfo {
 
 fn run(m: &ModelInfo, dir: &std::path::Path) -> (Result<(), DownloadError>, Vec<(u64, u64)>) {
     let mut seen = Vec::new();
-    let r = download_model(m, dir, &mut UreqHttp::default(), &mut |d, t| seen.push((d, t)));
+    let r = download_model(m, dir, &mut UreqHttp::default(), &mut |d, t| {
+        seen.push((d, t))
+    });
     (r, seen)
 }
 
@@ -106,7 +112,10 @@ fn a_download_is_verified_and_moved_into_the_models_folder_with_progress() {
     let m = model(&srv.url, GOOD_SHA);
     let (r, seen) = run(&m, dir.path());
     assert_eq!(r, Ok(()));
-    assert_eq!(std::fs::read(model_path(dir.path(), &m)).unwrap(), content());
+    assert_eq!(
+        std::fs::read(model_path(dir.path(), &m)).unwrap(),
+        content()
+    );
     assert!(!part_path(dir.path(), &m).exists());
     assert_eq!(*seen.last().unwrap(), (LEN as u64, LEN as u64));
     assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0));
@@ -121,13 +130,23 @@ fn an_interrupted_download_keeps_the_partial_file_and_the_next_try_resumes() {
     assert_eq!(r, Err(DownloadError::Interrupted));
     let kept = std::fs::metadata(part_path(dir.path(), &m)).unwrap().len();
     assert_eq!(kept, 40_000);
-    assert!(!model_path(dir.path(), &m).exists(), "partial file must not be loadable");
+    assert!(
+        !model_path(dir.path(), &m).exists(),
+        "partial file must not be loadable"
+    );
 
     let (r, seen) = run(&m, dir.path());
     assert_eq!(r, Ok(()));
     assert_eq!(*srv.ranges.lock().unwrap(), vec![0, 40_000]);
-    assert_eq!(seen.first().unwrap().0, 40_000, "progress continues from the partial file");
-    assert_eq!(std::fs::read(model_path(dir.path(), &m)).unwrap(), content());
+    assert_eq!(
+        seen.first().unwrap().0,
+        40_000,
+        "progress continues from the partial file"
+    );
+    assert_eq!(
+        std::fs::read(model_path(dir.path(), &m)).unwrap(),
+        content()
+    );
 }
 
 #[test]
@@ -138,7 +157,10 @@ fn a_server_that_ignores_range_restarts_from_zero_without_corruption() {
     std::fs::write(part_path(dir.path(), &m), &content()[..30_000]).unwrap();
     let (r, _) = run(&m, dir.path());
     assert_eq!(r, Ok(()));
-    assert_eq!(std::fs::read(model_path(dir.path(), &m)).unwrap(), content());
+    assert_eq!(
+        std::fs::read(model_path(dir.path(), &m)).unwrap(),
+        content()
+    );
 }
 
 #[test]
@@ -148,7 +170,11 @@ fn a_corrupted_download_is_retried_once_automatically_and_can_succeed() {
     let m = model(&srv.url, GOOD_SHA);
     let (r, _) = run(&m, dir.path());
     assert_eq!(r, Ok(()));
-    assert_eq!(*srv.ranges.lock().unwrap(), vec![0, 0], "the retry starts from scratch");
+    assert_eq!(
+        *srv.ranges.lock().unwrap(),
+        vec![0, 0],
+        "the retry starts from scratch"
+    );
 }
 
 #[test]
@@ -158,7 +184,11 @@ fn a_download_that_keeps_failing_verification_is_rejected_and_deleted() {
     let m = model(&srv.url, GOOD_SHA);
     let (r, _) = run(&m, dir.path());
     assert_eq!(r, Err(DownloadError::FailedVerification));
-    assert_eq!(srv.ranges.lock().unwrap().len(), 2, "exactly one automatic retry");
+    assert_eq!(
+        srv.ranges.lock().unwrap().len(),
+        2,
+        "exactly one automatic retry"
+    );
     assert!(!model_path(dir.path(), &m).exists());
     assert!(!part_path(dir.path(), &m).exists());
 }
@@ -175,7 +205,13 @@ fn an_unreachable_server_is_reported_as_no_internet() {
 
 #[test]
 fn the_user_facing_messages_match_the_spec() {
-    assert_eq!(DownloadError::NoInternet.message(), "No internet connection");
+    assert_eq!(
+        DownloadError::NoInternet.message(),
+        "No internet connection"
+    );
     assert_eq!(DownloadError::Interrupted.message(), "Download interrupted");
-    assert_eq!(DownloadError::FailedVerification.message(), "File failed verification");
+    assert_eq!(
+        DownloadError::FailedVerification.message(),
+        "File failed verification"
+    );
 }

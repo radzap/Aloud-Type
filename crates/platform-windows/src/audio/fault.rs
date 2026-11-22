@@ -24,7 +24,11 @@ pub struct CaptureError {
 
 impl CaptureError {
     pub fn new(kind: CaptureErrorKind) -> Self {
-        Self { kind, hresult: None, detail: String::new() }
+        Self {
+            kind,
+            hresult: None,
+            detail: String::new(),
+        }
     }
 }
 
@@ -68,13 +72,22 @@ mod tests {
 
     #[test]
     fn missing_device_at_open_is_no_microphone() {
-        assert_eq!(c(DeviceNotAvailable, Phase::Opening), Some(FaultReason::NoMicrophone));
+        assert_eq!(
+            c(DeviceNotAvailable, Phase::Opening),
+            Some(FaultReason::NoMicrophone)
+        );
     }
 
     #[test]
     fn unplugging_while_streaming_is_disconnected() {
-        assert_eq!(c(DeviceNotAvailable, Phase::Streaming), Some(FaultReason::Disconnected));
-        assert_eq!(c(StreamInvalidated, Phase::Streaming), Some(FaultReason::Disconnected));
+        assert_eq!(
+            c(DeviceNotAvailable, Phase::Streaming),
+            Some(FaultReason::Disconnected)
+        );
+        assert_eq!(
+            c(StreamInvalidated, Phase::Streaming),
+            Some(FaultReason::Disconnected)
+        );
     }
 
     #[test]
@@ -84,8 +97,15 @@ mod tests {
 
     #[test]
     fn denied_is_blocked_including_raw_access_denied_hresult() {
-        assert_eq!(c(PermissionDenied, Phase::Opening), Some(FaultReason::Blocked));
-        let e = CaptureError { kind: Other, hresult: Some(0x8007_0005), detail: String::new() };
+        assert_eq!(
+            c(PermissionDenied, Phase::Opening),
+            Some(FaultReason::Blocked)
+        );
+        let e = CaptureError {
+            kind: Other,
+            hresult: Some(0x8007_0005),
+            detail: String::new(),
+        };
         assert_eq!(classify(&e, Phase::Opening), Some(FaultReason::Blocked));
     }
 

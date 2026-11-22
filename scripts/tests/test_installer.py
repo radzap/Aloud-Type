@@ -38,7 +38,7 @@ class InstallerScript(unittest.TestCase):
 
     def test_program_files_and_user_data_are_separate_and_installer_never_ships_data(self):
         f = section("Files")
-        for needed in ("aloud-type.exe", "LICENSE", "THIRD-PARTY-NOTICES.txt"):
+        for needed in ("aloud-type.exe", "aloud-type-settings-ui.exe", "LICENSE", "THIRD-PARTY-NOTICES.txt"):
             self.assertIn(needed, f)
         self.assertNotRegex(f, r"\.(bin|toml)\b")
         self.assertNotIn("{localappdata}", section("InstallDelete") + section("Files"))

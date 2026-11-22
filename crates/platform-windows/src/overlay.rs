@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
-type Hwnd = isize;
+use crate::win32::{
+    DispatchMessageW, GetForegroundWindow, GetMessageW, Hwnd, Msg, Point, ShowWindow,
+    TranslateMessage,
+};
 
 const WM_DESTROY: u32 = 0x0002;
 const WM_CLOSE: u32 = 0x0010;
@@ -42,25 +45,9 @@ const SM_CYSCREEN: i32 = 1;
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
-struct Point {
-    x: i32,
-    y: i32,
-}
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
 struct Size {
     cx: i32,
     cy: i32,
-}
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: Hwnd,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: Point,
 }
 #[repr(C)]
 struct WndClassW {
@@ -115,48 +102,77 @@ struct BitmapInfo {
 }
 
 #[link(name = "user32")]
-#[allow(clashing_extern_declarations)]
 extern "system" {
     fn RegisterClassW(c: *const WndClassW) -> u16;
     fn CreateWindowExW(
-        ex: u32, class: *const u16, title: *const u16, style: u32, x: i32, y: i32, w: i32, h: i32, parent: Hwnd,
-        menu: isize, instance: isize, param: *const u8,
+        ex: u32,
+        class: *const u16,
+        title: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        parent: Hwnd,
+        menu: isize,
+        instance: isize,
+        param: *const u8,
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
-    fn GetMessageW(m: *mut Msg, h: Hwnd, min: u32, max: u32) -> i32;
-    fn TranslateMessage(m: *const Msg) -> i32;
-    fn DispatchMessageW(m: *const Msg) -> isize;
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
-    fn ShowWindow(h: Hwnd, cmd: i32) -> i32;
     fn SetTimer(h: Hwnd, id: usize, ms: u32, f: usize) -> usize;
     fn KillTimer(h: Hwnd, id: usize) -> i32;
     fn GetSystemMetrics(i: i32) -> i32;
-    fn GetForegroundWindow() -> Hwnd;
     fn MonitorFromWindow(h: Hwnd, flags: u32) -> isize;
     fn GetMonitorInfoW(m: isize, info: *mut MonitorInfo) -> i32;
     fn GetDC(h: Hwnd) -> isize;
     fn ReleaseDC(h: Hwnd, dc: isize) -> i32;
     fn DrawTextW(dc: isize, text: *const u16, n: i32, r: *mut WinRect, fmt: u32) -> i32;
     fn UpdateLayeredWindow(
-        h: Hwnd, dst_dc: isize, dst_pos: *const Point, size: *const Size, src_dc: isize, src_pos: *const Point,
-        key: u32, blend: *const BlendFunction, flags: u32,
+        h: Hwnd,
+        dst_dc: isize,
+        dst_pos: *const Point,
+        size: *const Size,
+        src_dc: isize,
+        src_pos: *const Point,
+        key: u32,
+        blend: *const BlendFunction,
+        flags: u32,
     ) -> i32;
 }
 #[link(name = "gdi32")]
 extern "system" {
     fn CreateCompatibleDC(dc: isize) -> isize;
-    fn CreateDIBSection(dc: isize, bmi: *const BitmapInfo, usage: u32, bits: *mut *mut c_void, section: isize, offset: u32)
-        -> isize;
+    fn CreateDIBSection(
+        dc: isize,
+        bmi: *const BitmapInfo,
+        usage: u32,
+        bits: *mut *mut c_void,
+        section: isize,
+        offset: u32,
+    ) -> isize;
     fn SelectObject(dc: isize, o: isize) -> isize;
     fn DeleteDC(dc: isize) -> i32;
     fn DeleteObject(o: isize) -> i32;
     fn SetBkMode(dc: isize, mode: i32) -> i32;
     fn SetTextColor(dc: isize, color: u32) -> u32;
     fn CreateFontW(
-        h: i32, w: i32, esc: i32, orient: i32, weight: i32, italic: u32, underline: u32, strike: u32, charset: u32,
-        out_prec: u32, clip_prec: u32, quality: u32, pitch: u32, face: *const u16,
+        h: i32,
+        w: i32,
+        esc: i32,
+        orient: i32,
+        weight: i32,
+        italic: u32,
+        underline: u32,
+        strike: u32,
+        charset: u32,
+        out_prec: u32,
+        clip_prec: u32,
+        quality: u32,
+        pitch: u32,
+        face: *const u16,
     ) -> isize;
 }
 #[link(name = "shcore")]
@@ -249,11 +265,24 @@ thread_local! {
 /// (primary when there is none), read when a Dictation's overlay appears.
 unsafe fn current_monitor() -> (Rect, f32) {
     let mon = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTOPRIMARY);
-    let mut info = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, ..Default::default() };
+    let mut info = MonitorInfo {
+        size: std::mem::size_of::<MonitorInfo>() as u32,
+        ..Default::default()
+    };
     let work = if mon != 0 && GetMonitorInfoW(mon, &mut info) != 0 {
-        Rect { left: info.work.left, top: info.work.top, right: info.work.right, bottom: info.work.bottom }
+        Rect {
+            left: info.work.left,
+            top: info.work.top,
+            right: info.work.right,
+            bottom: info.work.bottom,
+        }
     } else {
-        Rect { left: 0, top: 0, right: GetSystemMetrics(SM_CXSCREEN), bottom: GetSystemMetrics(SM_CYSCREEN) }
+        Rect {
+            left: 0,
+            top: 0,
+            right: GetSystemMetrics(SM_CXSCREEN),
+            bottom: GetSystemMetrics(SM_CYSCREEN),
+        }
     };
     let (mut dx, mut dy) = (96u32, 96u32);
     if mon != 0 && GetDpiForMonitor(mon, 0, &mut dx, &mut dy) != 0 {
@@ -283,10 +312,24 @@ unsafe fn draw_text(dc: isize, lines: &[model::TextLine]) {
             face.as_ptr(),
         );
         let old = SelectObject(dc, font);
-        SetTextColor(dc, l.color[0] as u32 | (l.color[1] as u32) << 8 | (l.color[2] as u32) << 16);
-        let mut r = WinRect { left: l.rect.left, top: l.rect.top, right: l.rect.right, bottom: l.rect.bottom };
+        SetTextColor(
+            dc,
+            l.color[0] as u32 | (l.color[1] as u32) << 8 | (l.color[2] as u32) << 16,
+        );
+        let mut r = WinRect {
+            left: l.rect.left,
+            top: l.rect.top,
+            right: l.rect.right,
+            bottom: l.rect.bottom,
+        };
         let text = wide(&l.text);
-        DrawTextW(dc, text.as_ptr(), -1, &mut r, DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
+        DrawTextW(
+            dc,
+            text.as_ptr(),
+            -1,
+            &mut r,
+            DT_CENTER | DT_WORDBREAK | DT_NOPREFIX,
+        );
         SelectObject(dc, old);
         DeleteObject(font);
     }
@@ -323,12 +366,20 @@ unsafe fn present(hwnd: Hwnd, host: &Host, frame: &model::Frame, placement: Plac
             model::restore_alpha(&px, buf);
         }
         let (x, y) = model::place(host.work, w as i32, h as i32, placement, host.scale);
-        let blend = BlendFunction { op: 0, flags: 0, alpha: (frame.opacity.clamp(0.0, 1.0) * 255.0).round() as u8, format: AC_SRC_ALPHA };
+        let blend = BlendFunction {
+            op: 0,
+            flags: 0,
+            alpha: (frame.opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+            format: AC_SRC_ALPHA,
+        };
         UpdateLayeredWindow(
             hwnd,
             screen,
             &Point { x, y },
-            &Size { cx: w as i32, cy: h as i32 },
+            &Size {
+                cx: w as i32,
+                cy: h as i32,
+            },
             mem,
             &Point::default(),
             0,
@@ -427,73 +478,85 @@ pub fn spawn(placement: Placement) -> std::io::Result<OverlayHandle> {
     });
     let (tx, rx) = mpsc::channel::<std::io::Result<()>>();
     let thread_shared = shared.clone();
-    std::thread::Builder::new().name("overlay".into()).spawn(move || unsafe {
-        let class = wide("AloudTypeOverlay");
-        let wc = WndClassW {
-            style: 0,
-            wnd_proc: proc_,
-            cls_extra: 0,
-            wnd_extra: 0,
-            instance: GetModuleHandleW(std::ptr::null()),
-            icon: 0,
-            cursor: 0,
-            background: 0,
-            menu_name: std::ptr::null(),
-            class_name: class.as_ptr(),
-        };
-        RegisterClassW(&wc);
-        let hwnd = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
-            class.as_ptr(),
-            std::ptr::null(),
-            WS_POPUP,
-            0,
-            0,
-            1,
-            1,
-            0,
-            0,
-            GetModuleHandleW(std::ptr::null()),
-            std::ptr::null(),
-        );
-        if hwnd == 0 {
-            let _ = tx.send(Err(std::io::Error::last_os_error()));
-            return;
-        }
-        HOST.with(|h| {
-            *h.borrow_mut() = Some(Host {
-                shared: thread_shared.clone(),
-                animator: Animator::new(),
-                started: Instant::now(),
-                visible: false,
-                work: Rect { left: 0, top: 0, right: 1920, bottom: 1080 },
-                scale: 1.0,
-            })
-        });
-        thread_shared.hwnd.store(hwnd, Ordering::SeqCst);
-        let _ = tx.send(Ok(()));
-        let mut m = Msg::default();
-        while GetMessageW(&mut m, 0, 0, 0) > 0 {
-            TranslateMessage(&m);
-            DispatchMessageW(&m);
-        }
-        thread_shared.hwnd.store(0, Ordering::SeqCst);
-        HOST.with(|h| *h.borrow_mut() = None);
-    })?;
-    rx.recv().map_err(|_| std::io::Error::other("overlay thread failed"))??;
+    std::thread::Builder::new()
+        .name("overlay".into())
+        .spawn(move || unsafe {
+            let class = wide("AloudTypeOverlay");
+            let wc = WndClassW {
+                style: 0,
+                wnd_proc: proc_,
+                cls_extra: 0,
+                wnd_extra: 0,
+                instance: GetModuleHandleW(std::ptr::null()),
+                icon: 0,
+                cursor: 0,
+                background: 0,
+                menu_name: std::ptr::null(),
+                class_name: class.as_ptr(),
+            };
+            RegisterClassW(&wc);
+            let hwnd = CreateWindowExW(
+                WS_EX_TOPMOST
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_NOACTIVATE
+                    | WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                0,
+                0,
+                GetModuleHandleW(std::ptr::null()),
+                std::ptr::null(),
+            );
+            if hwnd == 0 {
+                let _ = tx.send(Err(std::io::Error::last_os_error()));
+                return;
+            }
+            HOST.with(|h| {
+                *h.borrow_mut() = Some(Host {
+                    shared: thread_shared.clone(),
+                    animator: Animator::new(),
+                    started: Instant::now(),
+                    visible: false,
+                    work: Rect {
+                        left: 0,
+                        top: 0,
+                        right: 1920,
+                        bottom: 1080,
+                    },
+                    scale: 1.0,
+                })
+            });
+            thread_shared.hwnd.store(hwnd, Ordering::SeqCst);
+            let _ = tx.send(Ok(()));
+            let mut m = Msg::default();
+            while GetMessageW(&mut m, 0, 0, 0) > 0 {
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+            thread_shared.hwnd.store(0, Ordering::SeqCst);
+            HOST.with(|h| *h.borrow_mut() = None);
+        })?;
+    rx.recv()
+        .map_err(|_| std::io::Error::other("overlay thread failed"))??;
     Ok(OverlayHandle { shared })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::win32::IsWindowVisible;
     use aloud_type_core::listening::FaultReason;
     use std::time::Duration;
 
     #[link(name = "user32")]
     extern "system" {
         fn GetWindowLongW(h: Hwnd, index: i32) -> i32;
-        fn IsWindowVisible(h: Hwnd) -> i32;
         fn SendMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
         fn GetWindowRect(h: Hwnd, r: *mut WinRect) -> i32;
     }
@@ -508,17 +571,32 @@ mod tests {
         let h = o.hwnd();
         let fg = unsafe { GetForegroundWindow() };
         let ex = unsafe { GetWindowLongW(h, -20) } as u32;
-        for flag in [WS_EX_TOPMOST, WS_EX_TOOLWINDOW, WS_EX_NOACTIVATE, WS_EX_LAYERED, WS_EX_TRANSPARENT] {
+        for flag in [
+            WS_EX_TOPMOST,
+            WS_EX_TOOLWINDOW,
+            WS_EX_NOACTIVATE,
+            WS_EX_LAYERED,
+            WS_EX_TRANSPARENT,
+        ] {
             assert_ne!(ex & flag, 0, "missing style {flag:#x}");
         }
-        assert_eq!(unsafe { SendMessageW(h, WM_NCHITTEST, 0, 0) }, HTTRANSPARENT);
-        assert_eq!(unsafe { SendMessageW(h, WM_MOUSEACTIVATE, 0, 0) }, MA_NOACTIVATE);
+        assert_eq!(
+            unsafe { SendMessageW(h, WM_NCHITTEST, 0, 0) },
+            HTTRANSPARENT
+        );
+        assert_eq!(
+            unsafe { SendMessageW(h, WM_MOUSEACTIVATE, 0, 0) },
+            MA_NOACTIVATE
+        );
         // Idle: hidden, no timer.
         wait(100);
         assert!(!o.is_ticking());
         assert_eq!(unsafe { IsWindowVisible(h) }, 0);
         // Dictation: visible and ticking, focus untouched.
-        o.set_indicator(Indicator::Listening { level: 0.6, note: None });
+        o.set_indicator(Indicator::Listening {
+            level: 0.6,
+            note: None,
+        });
         wait(400);
         assert!(o.is_ticking());
         assert_ne!(unsafe { IsWindowVisible(h) }, 0);
@@ -542,7 +620,10 @@ mod tests {
         assert!(!o.is_ticking());
         assert_eq!(unsafe { IsWindowVisible(h) }, 0);
         // A second Dictation works again.
-        o.set_indicator(Indicator::Listening { level: 0.1, note: None });
+        o.set_indicator(Indicator::Listening {
+            level: 0.1,
+            note: None,
+        });
         wait(300);
         assert!(o.is_ticking());
         // A style change waits for the next Dictation: switch to Bar pill, end, restart.
@@ -552,14 +633,20 @@ mod tests {
         assert_eq!((r.right - r.left, r.bottom - r.top), (150, 22));
         o.set_indicator(Indicator::Hidden);
         wait(600);
-        o.set_indicator(Indicator::Listening { level: 0.4, note: None });
+        o.set_indicator(Indicator::Listening {
+            level: 0.4,
+            note: None,
+        });
         wait(300);
         unsafe { GetWindowRect(h, &mut r) };
         assert_eq!((r.right - r.left, r.bottom - r.top), (76, 26));
         o.set_style(Style::Orb);
         o.set_indicator(Indicator::Hidden);
         wait(600);
-        o.set_indicator(Indicator::Listening { level: 0.4, note: None });
+        o.set_indicator(Indicator::Listening {
+            level: 0.4,
+            note: None,
+        });
         wait(300);
         unsafe { GetWindowRect(h, &mut r) };
         assert_eq!((r.right - r.left, r.bottom - r.top), (40, 40));

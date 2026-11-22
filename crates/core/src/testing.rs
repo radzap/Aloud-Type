@@ -79,7 +79,8 @@ impl FakeRecognizer {
 
 impl Recognizer for FakeRecognizer {
     fn recognize(&mut self, audio: &[f32], language: &str, prompt: Option<&str>) -> Vec<Segment> {
-        self.calls.push((audio.len(), language.into(), prompt.map(Into::into)));
+        self.calls
+            .push((audio.len(), language.into(), prompt.map(Into::into)));
         self.script.pop_front().unwrap_or_default()
     }
 }
@@ -107,7 +108,11 @@ mod tests {
 
     #[test]
     fn recognizer_replays_script_and_records_calls() {
-        let seg = Segment { text: "hi".into(), words: vec![], no_speech_prob: 0.0 };
+        let seg = Segment {
+            text: "hi".into(),
+            words: vec![],
+            no_speech_prob: 0.0,
+        };
         let mut r = FakeRecognizer::new().then(vec![seg.clone()]);
         assert_eq!(r.recognize(&[0.0; 4], "en", Some("p")), vec![seg]);
         assert!(r.recognize(&[], "en", None).is_empty());

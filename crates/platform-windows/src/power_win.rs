@@ -18,7 +18,7 @@ pub fn map_power_broadcast(wparam: usize) -> Option<PowerEvent> {
     }
 }
 
-type Hwnd = isize;
+use crate::win32::{DispatchMessageW, GetMessageW, Hwnd, Msg};
 #[repr(C)]
 struct WndClassW {
     style: u32,
@@ -31,16 +31,6 @@ struct WndClassW {
     background: isize,
     menu: *const u16,
     class_name: *const u16,
-}
-#[repr(C)]
-#[derive(Default)]
-struct Msg {
-    hwnd: isize,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: [i32; 2],
 }
 #[link(name = "user32")]
 extern "system" {
@@ -60,8 +50,6 @@ extern "system" {
         param: *const u8,
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
-    fn GetMessageW(m: *mut Msg, h: Hwnd, a: u32, b: u32) -> i32;
-    fn DispatchMessageW(m: *const Msg) -> isize;
     fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
 }
 #[link(name = "kernel32")]
@@ -69,16 +57,19 @@ extern "system" {
     fn GetModuleHandleW(n: *const u16) -> isize;
 }
 
+type Notify = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 thread_local! {
-    static TX: std::cell::RefCell<Option<Sender<PowerEvent>>> = const { std::cell::RefCell::new(None) };
+    static TX: std::cell::RefCell<Option<(Sender<PowerEvent>, Notify)>> = const { std::cell::RefCell::new(None) };
 }
 
 unsafe extern "system" fn proc_(h: Hwnd, m: u32, w: usize, l: isize) -> isize {
     if m == WM_POWERBROADCAST {
         if let Some(e) = map_power_broadcast(w) {
             TX.with(|t| {
-                if let Some(t) = t.borrow().as_ref() {
+                if let Some((t, notify)) = t.borrow().as_ref() {
                     let _ = t.send(e);
+                    notify();
                 }
             });
         }
@@ -94,10 +85,15 @@ pub struct PowerWatcher {
 
 impl PowerWatcher {
     pub fn start() -> std::io::Result<Self> {
+        Self::start_notifying(std::sync::Arc::new(|| {}))
+    }
+
+    /// Like `start`, calling `notify` after each power event is queued.
+    pub fn start_notifying(notify: Notify) -> std::io::Result<Self> {
         let (tx, rx) = channel();
         let (ready_tx, ready_rx) = channel::<Hwnd>();
         std::thread::spawn(move || unsafe {
-            TX.with(|t| *t.borrow_mut() = Some(tx));
+            TX.with(|t| *t.borrow_mut() = Some((tx, notify)));
             let name: Vec<u16> = "AloudTypePower\0".encode_utf16().collect();
             let inst = GetModuleHandleW(std::ptr::null());
             let wc = WndClassW {
@@ -114,7 +110,20 @@ impl PowerWatcher {
             };
             RegisterClassW(&wc);
             // Top-level (not message-only) so it receives broadcasts.
-            let h = CreateWindowExW(0x80, name.as_ptr(), std::ptr::null(), 0, 0, 0, 0, 0, 0, 0, inst, std::ptr::null());
+            let h = CreateWindowExW(
+                0x80,
+                name.as_ptr(),
+                std::ptr::null(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                inst,
+                std::ptr::null(),
+            );
             let _ = ready_tx.send(h);
             if h == 0 {
                 return;
@@ -155,7 +164,13 @@ mod tests {
         let w = PowerWatcher::start().unwrap();
         w.simulate(PBT_APMSUSPEND);
         w.simulate(PBT_APMRESUMEAUTOMATIC);
-        assert_eq!(w.events.recv_timeout(Duration::from_secs(2)), Ok(PowerEvent::Suspend));
-        assert_eq!(w.events.recv_timeout(Duration::from_secs(2)), Ok(PowerEvent::Resume));
+        assert_eq!(
+            w.events.recv_timeout(Duration::from_secs(2)),
+            Ok(PowerEvent::Suspend)
+        );
+        assert_eq!(
+            w.events.recv_timeout(Duration::from_secs(2)),
+            Ok(PowerEvent::Resume)
+        );
     }
 }

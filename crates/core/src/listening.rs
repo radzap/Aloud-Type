@@ -11,8 +11,10 @@ pub const STALL_MS: Millis = 1000;
 pub const DIGITAL_SILENCE_MS: Millis = 4000;
 pub const HOLD_LINGER_MS: Millis = 2000;
 pub const HANDS_FREE_DISMISS_MS: Millis = 5000;
-pub const FALLBACK_NOTE_MS: Millis = 3000;
-pub const FALLBACK_NOTE: &str = "Microphone not found, using the system default";
+pub const FALLBACK_NOTE_MS: Millis = 2000;
+pub const FALLBACK_NOTE: &str = "Using default microphone";
+/// A Dictation refused at the key press (administrator window) shows its notice this long.
+pub const REFUSAL_NOTICE_MS: Millis = 2000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FaultReason {
@@ -47,11 +49,20 @@ impl FaultReason {
 pub enum Indicator {
     Hidden,
     /// Normal listening (not red). `note` is the brief missing-microphone note.
-    Listening { level: f32, note: Option<&'static str> },
+    Listening {
+        level: f32,
+        note: Option<&'static str>,
+    },
     /// Red, grown, with the reason.
-    ListeningFault { reason: FaultReason, message: &'static str, recoverable: bool },
+    ListeningFault {
+        reason: FaultReason,
+        message: &'static str,
+        recoverable: bool,
+    },
     /// Amber, with the reason.
-    TypingFault { message: String },
+    TypingFault {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,7 +115,12 @@ struct Active {
 enum Phase {
     Idle,
     Active(Active),
-    Fault { what: Standing, dismiss_at: Option<Millis> },
+    /// `fixed`: the dismissal time does not depend on the key (a refused start).
+    Fault {
+        what: Standing,
+        dismiss_at: Option<Millis>,
+        fixed: bool,
+    },
 }
 
 pub struct ListeningMonitor<C: Clock> {
@@ -118,7 +134,14 @@ pub struct ListeningMonitor<C: Clock> {
 
 impl<C: Clock> ListeningMonitor<C> {
     pub fn new(clock: C) -> Self {
-        Self { clock, phase: Phase::Idle, mode: Mode::Hold, key_held: false, tray_fault: None, actions: vec![] }
+        Self {
+            clock,
+            phase: Phase::Idle,
+            mode: Mode::Hold,
+            key_held: false,
+            tray_fault: None,
+            actions: vec![],
+        }
     }
 
     /// A Dictation starts with the key held. `fallback_note` is set when the
@@ -143,7 +166,12 @@ impl<C: Clock> ListeningMonitor<C> {
         self.mode = Mode::HandsFree;
         self.key_held = false;
         let now = self.clock.now();
-        if let Phase::Fault { dismiss_at, .. } = &mut self.phase {
+        if let Phase::Fault {
+            dismiss_at,
+            fixed: false,
+            ..
+        } = &mut self.phase
+        {
             *dismiss_at = Some(now + HANDS_FREE_DISMISS_MS);
         }
     }
@@ -152,7 +180,15 @@ impl<C: Clock> ListeningMonitor<C> {
     pub fn release(&mut self) {
         self.key_held = false;
         let now = self.clock.now();
-        if let (Phase::Fault { dismiss_at, .. }, Mode::Hold) = (&mut self.phase, self.mode) {
+        if let (
+            Phase::Fault {
+                dismiss_at,
+                fixed: false,
+                ..
+            },
+            Mode::Hold,
+        ) = (&mut self.phase, self.mode)
+        {
             *dismiss_at = Some(now + HOLD_LINGER_MS);
         }
     }
@@ -182,7 +218,9 @@ impl<C: Clock> ListeningMonitor<C> {
     /// One audio packet (non-empty) and whether the voice gate heard speech.
     pub fn audio(&mut self, samples: &[f32], voice: bool) {
         let now = self.clock.now();
-        let Phase::Active(a) = &mut self.phase else { return };
+        let Phase::Active(a) = &mut self.phase else {
+            return;
+        };
         if samples.is_empty() {
             return;
         }
@@ -205,6 +243,19 @@ impl<C: Clock> ListeningMonitor<C> {
             return;
         }
         self.end_with(reason);
+    }
+
+    /// The Dictation key went down but no Dictation may start (an administrator
+    /// window has focus): an amber notice for a fixed ~2 s, whatever the key does.
+    pub fn refuse_start(&mut self, message: impl Into<String>) {
+        let now = self.clock.now();
+        self.mode = Mode::Hold;
+        self.key_held = true;
+        self.phase = Phase::Fault {
+            what: Standing::Typing(message.into()),
+            dismiss_at: Some(now + REFUSAL_NOTICE_MS),
+            fixed: true,
+        };
     }
 
     /// Typing could not be delivered: ends the Dictation with an amber message.
@@ -232,7 +283,10 @@ impl<C: Clock> ListeningMonitor<C> {
                     a.no_sound_shown = true;
                 }
             }
-            Phase::Fault { dismiss_at: Some(t), .. } if now >= *t => self.phase = Phase::Idle,
+            Phase::Fault {
+                dismiss_at: Some(t),
+                ..
+            } if now >= *t => self.phase = Phase::Idle,
             _ => {}
         }
         if let Some(r) = ending {
@@ -252,7 +306,11 @@ impl<C: Clock> ListeningMonitor<C> {
         let now = self.clock.now();
         let dismiss_at = (self.mode == Mode::HandsFree).then_some(now + HANDS_FREE_DISMISS_MS);
         self.actions.push(Action::EndDictationFlushAudio);
-        self.phase = Phase::Fault { what, dismiss_at };
+        self.phase = Phase::Fault {
+            what,
+            dismiss_at,
+            fixed: false,
+        };
     }
 
     pub fn take_actions(&mut self) -> Vec<Action> {
@@ -271,10 +329,18 @@ impl<C: Clock> ListeningMonitor<C> {
                 level: a.level,
                 note: a.note_until.map(|_| FALLBACK_NOTE),
             },
-            Phase::Fault { what: Standing::Listening(r), .. } => {
-                Indicator::ListeningFault { reason: *r, message: r.message(), recoverable: false }
-            }
-            Phase::Fault { what: Standing::Typing(m), .. } => Indicator::TypingFault { message: m.clone() },
+            Phase::Fault {
+                what: Standing::Listening(r),
+                ..
+            } => Indicator::ListeningFault {
+                reason: *r,
+                message: r.message(),
+                recoverable: false,
+            },
+            Phase::Fault {
+                what: Standing::Typing(m),
+                ..
+            } => Indicator::TypingFault { message: m.clone() },
         }
     }
 
@@ -308,7 +374,13 @@ mod tests {
     }
 
     /// Feed `packet` every 100 ms for `ms`, ticking each time.
-    fn feed(m: &mut ListeningMonitor<FakeClock>, c: &FakeClock, ms: u64, packet: &[f32], voice: bool) {
+    fn feed(
+        m: &mut ListeningMonitor<FakeClock>,
+        c: &FakeClock,
+        ms: u64,
+        packet: &[f32],
+        voice: bool,
+    ) {
         for _ in 0..ms / 100 {
             c.advance(100);
             m.audio(packet, voice);
@@ -317,7 +389,13 @@ mod tests {
     }
 
     fn no_sound(m: &ListeningMonitor<FakeClock>) -> bool {
-        matches!(m.indicator(), Indicator::ListeningFault { reason: FaultReason::NoSound, .. })
+        matches!(
+            m.indicator(),
+            Indicator::ListeningFault {
+                reason: FaultReason::NoSound,
+                ..
+            }
+        )
     }
 
     #[test]
@@ -327,10 +405,18 @@ mod tests {
         assert_eq!(m.tray(), Tray::Idle);
         m.start(false);
         feed(&mut m, &c, 100, &VOICE, true);
-        assert_eq!(m.indicator(), Indicator::Listening { level: 0.5, note: None });
+        assert_eq!(
+            m.indicator(),
+            Indicator::Listening {
+                level: 0.5,
+                note: None
+            }
+        );
         assert_eq!(m.tray(), Tray::Listening);
         feed(&mut m, &c, 100, &QUIET, false);
-        let Indicator::Listening { level, .. } = m.indicator() else { panic!() };
+        let Indicator::Listening { level, .. } = m.indicator() else {
+            panic!()
+        };
         assert!(level < 0.01);
     }
 
@@ -344,7 +430,11 @@ mod tests {
         assert!(no_sound(&m));
         assert_eq!(
             m.indicator(),
-            Indicator::ListeningFault { reason: FaultReason::NoSound, message: "No sound detected", recoverable: true }
+            Indicator::ListeningFault {
+                reason: FaultReason::NoSound,
+                message: "No sound detected",
+                recoverable: true
+            }
         );
         assert_eq!(m.tray(), Tray::Listening);
         assert!(m.take_actions().is_empty());
@@ -359,7 +449,10 @@ mod tests {
         feed(&mut m, &c, 100, &VOICE, true);
         assert!(matches!(m.indicator(), Indicator::Listening { .. }));
         feed(&mut m, &c, 10_000, &QUIET, false);
-        assert!(matches!(m.indicator(), Indicator::Listening { .. }), "silence after a voice never faults");
+        assert!(
+            matches!(m.indicator(), Indicator::Listening { .. }),
+            "silence after a voice never faults"
+        );
     }
 
     #[test]
@@ -379,7 +472,10 @@ mod tests {
         feed(&mut m, &c, 500, &VOICE, true);
         c.advance(1000);
         m.tick();
-        assert!(matches!(m.indicator(), Indicator::Listening { .. }), "exactly 1 s is not over 1 s");
+        assert!(
+            matches!(m.indicator(), Indicator::Listening { .. }),
+            "exactly 1 s is not over 1 s"
+        );
         c.advance(1);
         m.tick();
         assert_eq!(
@@ -403,7 +499,11 @@ mod tests {
         feed(&mut m, &c, 100, &ZEROS, false);
         assert!(matches!(
             m.indicator(),
-            Indicator::ListeningFault { reason: FaultReason::MutedOrSilent, recoverable: false, .. }
+            Indicator::ListeningFault {
+                reason: FaultReason::MutedOrSilent,
+                recoverable: false,
+                ..
+            }
         ));
         assert_eq!(m.take_actions(), vec![Action::EndDictationFlushAudio]);
     }
@@ -432,7 +532,14 @@ mod tests {
             let (mut m, _) = rig();
             m.start(false);
             m.platform_fault(r);
-            assert_eq!(m.indicator(), Indicator::ListeningFault { reason: r, message: msg, recoverable: false });
+            assert_eq!(
+                m.indicator(),
+                Indicator::ListeningFault {
+                    reason: r,
+                    message: msg,
+                    recoverable: false
+                }
+            );
             assert_eq!(m.tray(), Tray::Fault(msg));
             assert_eq!(m.take_actions(), vec![Action::EndDictationFlushAudio]);
         }
@@ -454,7 +561,10 @@ mod tests {
         m.platform_fault(FaultReason::NoMicrophone);
         c.advance(30_000);
         m.tick();
-        assert!(matches!(m.indicator(), Indicator::ListeningFault { .. }), "red while the key is held");
+        assert!(
+            matches!(m.indicator(), Indicator::ListeningFault { .. }),
+            "red while the key is held"
+        );
         m.release();
         c.advance(1999);
         m.tick();
@@ -462,7 +572,11 @@ mod tests {
         c.advance(1);
         m.tick();
         assert_eq!(m.indicator(), Indicator::Hidden);
-        assert_eq!(m.tray(), Tray::Fault("No microphone found"), "tray keeps the reason");
+        assert_eq!(
+            m.tray(),
+            Tray::Fault("No microphone found"),
+            "tray keeps the reason"
+        );
     }
 
     #[test]
@@ -531,7 +645,10 @@ mod tests {
         m.tick();
         assert!(m.blocked_fault_standing());
         m.start(false);
-        assert!(m.blocked_fault_standing(), "still standing until a voice is heard");
+        assert!(
+            m.blocked_fault_standing(),
+            "still standing until a voice is heard"
+        );
         feed(&mut m, &c, 100, &VOICE, true);
         assert!(!m.blocked_fault_standing());
         m.end();
@@ -551,9 +668,81 @@ mod tests {
         let (mut m, c) = rig();
         m.start(true);
         feed(&mut m, &c, 100, &VOICE, true);
-        assert_eq!(m.indicator(), Indicator::Listening { level: 0.5, note: Some(FALLBACK_NOTE) });
-        feed(&mut m, &c, 2900, &VOICE, true);
-        assert_eq!(m.indicator(), Indicator::Listening { level: 0.5, note: None });
+        assert_eq!(
+            m.indicator(),
+            Indicator::Listening {
+                level: 0.5,
+                note: Some(FALLBACK_NOTE)
+            }
+        );
+        feed(&mut m, &c, 1900, &VOICE, true);
+        assert_eq!(
+            m.indicator(),
+            Indicator::Listening {
+                level: 0.5,
+                note: None
+            }
+        );
+    }
+
+    #[test]
+    fn fallback_note_reads_using_default_microphone_for_about_2s() {
+        let (mut m, c) = rig();
+        m.start(true);
+        assert_eq!(
+            m.indicator(),
+            Indicator::Listening {
+                level: 0.0,
+                note: Some("Using default microphone")
+            }
+        );
+        feed(&mut m, &c, 1900, &VOICE, true);
+        assert!(matches!(
+            m.indicator(),
+            Indicator::Listening { note: Some(_), .. }
+        ));
+        feed(&mut m, &c, 100, &VOICE, true);
+        assert!(matches!(
+            m.indicator(),
+            Indicator::Listening { note: None, .. }
+        ));
+    }
+
+    #[test]
+    fn start_refusal_notice_lasts_2s_even_when_the_press_was_a_tap() {
+        let (mut m, c) = rig();
+        m.refuse_start("Can't type into an administrator window");
+        assert_eq!(
+            m.indicator(),
+            Indicator::TypingFault {
+                message: "Can't type into an administrator window".into()
+            }
+        );
+        assert!(m.take_actions().is_empty());
+        c.advance(50);
+        m.release();
+        m.latch(); // the engine saw a tap and went hands-free
+        c.advance(1949);
+        m.tick();
+        assert!(
+            matches!(m.indicator(), Indicator::TypingFault { .. }),
+            "still up just before 2 s"
+        );
+        c.advance(1);
+        m.tick();
+        assert_eq!(m.indicator(), Indicator::Hidden);
+    }
+
+    #[test]
+    fn start_refusal_notice_lasts_2s_when_the_key_stays_held() {
+        let (mut m, c) = rig();
+        m.refuse_start("x");
+        c.advance(1999);
+        m.tick();
+        assert!(matches!(m.indicator(), Indicator::TypingFault { .. }));
+        c.advance(1);
+        m.tick();
+        assert_eq!(m.indicator(), Indicator::Hidden);
     }
 
     #[test]
@@ -562,14 +751,22 @@ mod tests {
         m.start(false);
         m.typing_fault("Cannot type into an administrator window");
         let amber = m.indicator();
-        assert_eq!(amber, Indicator::TypingFault { message: "Cannot type into an administrator window".into() });
+        assert_eq!(
+            amber,
+            Indicator::TypingFault {
+                message: "Cannot type into an administrator window".into()
+            }
+        );
         assert_eq!(m.take_actions(), vec![Action::EndDictationFlushAudio]);
         m.platform_fault(FaultReason::NoMicrophone);
         assert_eq!(m.indicator(), amber, "a standing fault is not replaced");
         let (mut r, _) = rig();
         r.start(false);
         r.platform_fault(FaultReason::NoMicrophone);
-        assert_ne!(std::mem::discriminant(&r.indicator()), std::mem::discriminant(&amber));
+        assert_ne!(
+            std::mem::discriminant(&r.indicator()),
+            std::mem::discriminant(&amber)
+        );
     }
 
     #[test]

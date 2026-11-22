@@ -1,5 +1,5 @@
 ; Aloud Type per-user installer. Build: iscc /DAppVersion=0.1.0 /DStageDir=<dir with release files> aloud-type.iss
-; StageDir holds aloud-type.exe, LICENSE, THIRD-PARTY-NOTICES.txt, README.txt (see scripts/release.py).
+; StageDir holds aloud-type.exe, aloud-type-settings-ui.exe, LICENSE, THIRD-PARTY-NOTICES.txt, README.txt (see scripts/release.py).
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -32,6 +32,7 @@ Name: "autostart"; Description: "Launch Aloud Type when I sign in to Windows"; F
 [Files]
 ; Program files only. Settings and Speech models live in %LOCALAPPDATA%\AloudType and are never installed or replaced.
 Source: "{#StageDir}\aloud-type.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#StageDir}\aloud-type-settings-ui.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion

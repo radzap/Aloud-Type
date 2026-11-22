@@ -91,7 +91,13 @@ fn a_finished_download_completes_first_run_and_selects_the_model_that_was_asked_
     let (mut m, sent) = manager(d.path());
     m.select("small-q5_1");
     m.start_download("small-q5_1");
-    assert_eq!(status(&m, "small-q5_1"), ModelStatus::Downloading { done: 0, total: 190_085_487 });
+    assert_eq!(
+        status(&m, "small-q5_1"),
+        ModelStatus::Downloading {
+            done: 0,
+            total: 190_085_487
+        }
+    );
     install(d.path(), "small-q5_1"); // what the downloader leaves behind
     m.finish_download("small-q5_1", Ok(()));
     assert_eq!(status(&m, "small-q5_1"), ModelStatus::Downloaded);
@@ -116,22 +122,32 @@ fn a_failed_download_shows_the_error_with_retry_and_remembers_the_partial_bytes(
     )
     .unwrap();
     m.finish_download("base-q5_1", Err(DownloadError::Interrupted));
-    assert_eq!(status(&m, "base-q5_1"), ModelStatus::Failed(DownloadError::Interrupted));
+    assert_eq!(
+        status(&m, "base-q5_1"),
+        ModelStatus::Failed(DownloadError::Interrupted)
+    );
     assert!(m.needs_setup());
     let state = ConfigFile::<State>::open(AppPaths::under(d.path()).state_file());
     assert_eq!(state.value().downloads.get("base-q5_1"), Some(&1234));
     // Retry clears the error and shows progress again.
     m.start_download("base-q5_1");
-    assert!(matches!(status(&m, "base-q5_1"), ModelStatus::Downloading { done: 1234, .. }));
+    assert!(matches!(
+        status(&m, "base-q5_1"),
+        ModelStatus::Downloading { done: 1234, .. }
+    ));
 }
 
 #[test]
 fn english_only_models_disable_the_language_setting_and_force_english() {
     let d = tempfile::tempdir().unwrap();
     install(d.path(), "base.en-q5_1");
-    std::fs::write(AppPaths::under(d.path()).settings_file(), "version = 1
+    std::fs::write(
+        AppPaths::under(d.path()).settings_file(),
+        "version = 1
 language = \"auto\"
-").unwrap();
+",
+    )
+    .unwrap();
     let (mut m, _) = manager(d.path());
     assert!(m.language_enabled());
     m.select("base.en-q5_1");

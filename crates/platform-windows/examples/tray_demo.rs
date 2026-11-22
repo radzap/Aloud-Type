@@ -27,17 +27,30 @@ fn main() {
             println!("command: {c:?}");
         }
     });
-    let secs: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(6);
+    let secs: u64 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(6);
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(1));
         h.set_state(&Tray::Listening, false, false);
         thread::sleep(Duration::from_secs(1));
-        h.set_state(&Tray::Fault("Microphone is blocked by Windows privacy settings"), false, true);
+        h.set_state(
+            &Tray::Fault("Microphone is blocked by Windows privacy settings"),
+            false,
+            true,
+        );
         thread::sleep(Duration::from_secs(secs));
         h.quit();
     });
     let keys = vec!["RightCtrl".to_string()];
-    run(handle, tx, startup_action(true, &keys), view(&Tray::Idle, false)).expect("tray");
+    run(
+        handle,
+        tx,
+        startup_action(true, &keys),
+        view(&Tray::Idle, false),
+    )
+    .expect("tray");
     println!("tray loop ended");
 }
 #[cfg(not(windows))]

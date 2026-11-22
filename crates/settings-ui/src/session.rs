@@ -13,7 +13,12 @@ pub struct RebindSession<T: Transport> {
 
 impl<T: Transport> RebindSession<T> {
     pub fn new(config: ConfigFile<Settings>, transport: T) -> Self {
-        Self { config, link: ResidentLink::new(transport), capture: None, save_error: None }
+        Self {
+            config,
+            link: ResidentLink::new(transport),
+            capture: None,
+            save_error: None,
+        }
     }
 
     pub fn dictation_key(&self) -> &[String] {
@@ -124,7 +129,10 @@ mod tests {
         assert_eq!(*log.borrow(), ["suspend-keys"]);
         s.key_down(F9);
         s.key_up(F9, 100);
-        assert_eq!(*log.borrow(), ["suspend-keys", "reload-settings", "resume-keys"]);
+        assert_eq!(
+            *log.borrow(),
+            ["suspend-keys", "reload-settings", "resume-keys"]
+        );
         assert!(!s.is_capturing());
         assert_eq!(s.dictation_key(), ["F9".to_string()]);
         let reread = ConfigFile::<Settings>::open(&p);
@@ -158,11 +166,17 @@ mod tests {
 
     #[test]
     fn works_when_the_resident_process_is_not_running() {
-        let (mut s, _d, p) = session(Fake { down: true, ..Default::default() });
+        let (mut s, _d, p) = session(Fake {
+            down: true,
+            ..Default::default()
+        });
         s.begin_capture(0);
         s.key_down(F9);
         s.key_up(F9, 100);
-        assert_eq!(ConfigFile::<Settings>::open(&p).value().dictation_key, vec!["F9".to_string()]);
+        assert_eq!(
+            ConfigFile::<Settings>::open(&p).value().dictation_key,
+            vec!["F9".to_string()]
+        );
     }
 
     #[test]

@@ -54,7 +54,11 @@ impl Default for UreqHttp {
     fn default() -> Self {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .tls_config(ureq::tls::TlsConfig::builder().provider(ureq::tls::TlsProvider::NativeTls).build())
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .provider(ureq::tls::TlsProvider::NativeTls)
+                    .build(),
+            )
             .timeout_connect(Some(std::time::Duration::from_secs(15)))
             .timeout_recv_body(Some(std::time::Duration::from_secs(30)))
             .build()
@@ -99,7 +103,10 @@ pub fn download_model(
     // A checksum mismatch deletes the file and retries once automatically.
     for attempt in 0..2 {
         fetch(m, &part, http, progress)?;
-        if sha256_file(&part).map(|h| h.eq_ignore_ascii_case(m.sha256)).unwrap_or(false) {
+        if sha256_file(&part)
+            .map(|h| h.eq_ignore_ascii_case(m.sha256))
+            .unwrap_or(false)
+        {
             fs::rename(&part, model_path(dir, m)).map_err(|_| DownloadError::Interrupted)?;
             return Ok(());
         }
@@ -150,7 +157,8 @@ fn fetch(
         match body.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                out.write_all(&buf[..n]).map_err(|_| DownloadError::Interrupted)?;
+                out.write_all(&buf[..n])
+                    .map_err(|_| DownloadError::Interrupted)?;
                 have += n as u64;
                 progress(have.min(m.size), m.size);
             }

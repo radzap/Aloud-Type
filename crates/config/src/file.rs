@@ -20,7 +20,10 @@ pub trait Schema: Sized + Default + Clone {
 pub enum ConfigError {
     Io(std::io::Error),
     /// The file was written by a newer app version and is never overwritten.
-    NewerVersion { file: u32, app: u32 },
+    NewerVersion {
+        file: u32,
+        app: u32,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -28,7 +31,10 @@ impl fmt::Display for ConfigError {
         match self {
             ConfigError::Io(e) => write!(f, "{e}"),
             ConfigError::NewerVersion { file, app } => {
-                write!(f, "file version {file} is newer than this app ({app}); left untouched")
+                write!(
+                    f,
+                    "file version {file} is newer than this app ({app}); left untouched"
+                )
             }
         }
     }
@@ -47,9 +53,13 @@ pub enum LoadStatus {
     Missing,
     Loaded,
     /// Older file was migrated in memory (written on next save).
-    Migrated { from: u32 },
+    Migrated {
+        from: u32,
+    },
     /// Newer file: values read best-effort, file is read-only, backup kept.
-    ReadOnlyNewer { file_version: u32 },
+    ReadOnlyNewer {
+        file_version: u32,
+    },
     /// Invalid file; the last good value is kept (defaults on first load).
     Invalid(String),
 }
@@ -112,13 +122,18 @@ impl<T: Schema, F: Fs> ConfigFile<T, F> {
     }
 
     fn read_disk(&mut self) -> Result<LoadStatus, String> {
-        let text = self.fs.read_to_string(&self.path).map_err(|e| e.to_string())?;
+        let text = self
+            .fs
+            .read_to_string(&self.path)
+            .map_err(|e| e.to_string())?;
         let Some(text) = text else {
             self.read_only = false;
             self.doc = DocumentMut::new();
             return Ok(LoadStatus::Missing);
         };
-        let mut doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| e.to_string())?;
+        let mut doc: DocumentMut = text
+            .parse()
+            .map_err(|e: toml_edit::TomlError| e.to_string())?;
         let version = match doc.get("version") {
             None => 0,
             Some(v) => v
@@ -137,7 +152,9 @@ impl<T: Schema, F: Fs> ConfigFile<T, F> {
                 self.value = v;
             }
             self.doc = doc;
-            return Ok(LoadStatus::ReadOnlyNewer { file_version: version });
+            return Ok(LoadStatus::ReadOnlyNewer {
+                file_version: version,
+            });
         }
         let migrated = version < T::VERSION && version != 0;
         if version < T::VERSION {
@@ -147,7 +164,11 @@ impl<T: Schema, F: Fs> ConfigFile<T, F> {
         self.value = value;
         self.doc = doc;
         self.read_only = false;
-        Ok(if migrated { LoadStatus::Migrated { from: version } } else { LoadStatus::Loaded })
+        Ok(if migrated {
+            LoadStatus::Migrated { from: version }
+        } else {
+            LoadStatus::Loaded
+        })
     }
 
     /// Single-writer update: re-read the file, apply `f`, write atomically.
@@ -155,7 +176,10 @@ impl<T: Schema, F: Fs> ConfigFile<T, F> {
     pub fn update(&mut self, f: impl FnOnce(&mut T)) -> Result<(), ConfigError> {
         self.reload();
         if let LoadStatus::ReadOnlyNewer { file_version } = self.status {
-            return Err(ConfigError::NewerVersion { file: file_version, app: T::VERSION });
+            return Err(ConfigError::NewerVersion {
+                file: file_version,
+                app: T::VERSION,
+            });
         }
         if matches!(self.status, LoadStatus::Invalid(_)) && self.fs.exists(&self.path) {
             // Preserve the user's broken hand edit before replacing it.
@@ -183,28 +207,43 @@ pub(crate) mod h {
     pub fn get_str(doc: &DocumentMut, k: &str) -> Result<Option<String>, String> {
         match doc.get(k) {
             None => Ok(None),
-            Some(v) => v.as_str().map(|s| Some(s.to_string())).ok_or(format!("`{k}` must be a string")),
+            Some(v) => v
+                .as_str()
+                .map(|s| Some(s.to_string()))
+                .ok_or(format!("`{k}` must be a string")),
         }
     }
     pub fn get_bool(doc: &DocumentMut, k: &str) -> Result<Option<bool>, String> {
         match doc.get(k) {
             None => Ok(None),
-            Some(v) => v.as_bool().map(Some).ok_or(format!("`{k}` must be true or false")),
+            Some(v) => v
+                .as_bool()
+                .map(Some)
+                .ok_or(format!("`{k}` must be true or false")),
         }
     }
     pub fn get_int(doc: &DocumentMut, k: &str) -> Result<Option<i64>, String> {
         match doc.get(k) {
             None => Ok(None),
-            Some(v) => v.as_integer().map(Some).ok_or(format!("`{k}` must be an integer")),
+            Some(v) => v
+                .as_integer()
+                .map(Some)
+                .ok_or(format!("`{k}` must be an integer")),
         }
     }
     pub fn get_str_array(doc: &DocumentMut, k: &str) -> Result<Option<Vec<String>>, String> {
         match doc.get(k) {
             None => Ok(None),
             Some(v) => {
-                let a = v.as_array().ok_or(format!("`{k}` must be a list of strings"))?;
+                let a = v
+                    .as_array()
+                    .ok_or(format!("`{k}` must be a list of strings"))?;
                 a.iter()
-                    .map(|x| x.as_str().map(String::from).ok_or(format!("`{k}` must be a list of strings")))
+                    .map(|x| {
+                        x.as_str()
+                            .map(String::from)
+                            .ok_or(format!("`{k}` must be a list of strings"))
+                    })
                     .collect::<Result<Vec<_>, _>>()
                     .map(Some)
             }

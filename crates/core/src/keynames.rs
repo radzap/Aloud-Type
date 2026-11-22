@@ -58,14 +58,29 @@ pub fn vk_for_name(name: &str) -> Option<u32> {
     (0u32..256).find(|vk| name_for_vk(*vk).as_deref() == Some(name))
 }
 
-const MODIFIER_ORDER: [&str; 8] =
-    ["LeftCtrl", "RightCtrl", "LeftShift", "RightShift", "LeftAlt", "RightAlt", "LeftWin", "RightWin"];
+const MODIFIER_ORDER: [&str; 8] = [
+    "LeftCtrl",
+    "RightCtrl",
+    "LeftShift",
+    "RightShift",
+    "LeftAlt",
+    "RightAlt",
+    "LeftWin",
+    "RightWin",
+];
 
 /// Modifiers first in a fixed order, then the other key: a stable stored form.
 pub fn canonical(keys: &[String]) -> Vec<String> {
-    let mut out: Vec<String> =
-        MODIFIER_ORDER.iter().filter(|m| keys.iter().any(|k| k == *m)).map(|m| m.to_string()).collect();
-    out.extend(keys.iter().filter(|k| !MODIFIER_ORDER.contains(&k.as_str())).cloned());
+    let mut out: Vec<String> = MODIFIER_ORDER
+        .iter()
+        .filter(|m| keys.iter().any(|k| k == *m))
+        .map(|m| m.to_string())
+        .collect();
+    out.extend(
+        keys.iter()
+            .filter(|k| !MODIFIER_ORDER.contains(&k.as_str()))
+            .cloned(),
+    );
     out
 }
 
@@ -90,6 +105,9 @@ mod tests {
     #[test]
     fn canonical_puts_modifiers_first_in_fixed_order() {
         let k = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(canonical(&k(&["Q", "LeftShift", "LeftCtrl"])), k(&["LeftCtrl", "LeftShift", "Q"]));
+        assert_eq!(
+            canonical(&k(&["Q", "LeftShift", "LeftCtrl"])),
+            k(&["LeftCtrl", "LeftShift", "Q"])
+        );
     }
 }

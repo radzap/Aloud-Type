@@ -1,14 +1,20 @@
 //! The controller: one `step()` per ~20 ms drives the Dictation lifecycle,
 //! audio, Streaming insertion, the Listening indicator and faults.
+use crate::residency::Residency;
 use aloud_type_core::lifecycle::{DictationEngine, Effect, LifecycleConfig, Phase};
-use aloud_type_core::listening::{Action, FaultReason, Indicator, KeyOutcome, ListeningMonitor, Tray};
+use aloud_type_core::listening::{
+    Action, FaultReason, Indicator, KeyOutcome, ListeningMonitor, Tray,
+};
 use aloud_type_core::power::{on_power, PowerAction, PowerEvent};
 use aloud_type_core::streaming::{StreamingConfig, StreamingInsertion, TextSink};
 use aloud_type_core::supervisor::WorkerFault;
-use crate::residency::Residency;
 use aloud_type_core::{Clock, Keyboard, Recognizer, VoiceGate};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// How often `step()` must run while a Dictation, key press or fault is live.
+pub const ACTIVE_POLL: Duration = Duration::from_millis(20);
 
 /// Which microphone to open.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -27,7 +33,10 @@ pub struct DictationSettings {
 
 impl Default for DictationSettings {
     fn default() -> Self {
-        Self { language: "auto".into(), microphone: Mic::SystemDefault }
+        Self {
+            language: "auto".into(),
+            microphone: Mic::SystemDefault,
+        }
     }
 }
 
@@ -71,7 +80,10 @@ pub struct ControllerConfig {
 
 impl Default for ControllerConfig {
     fn default() -> Self {
-        Self { chunk_ms: 1000, hangover_ms: 1000 }
+        Self {
+            chunk_ms: 600,
+            hangover_ms: 1000,
+        }
     }
 }
 
@@ -205,6 +217,21 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
         self.session.is_some()
     }
 
+    /// When `step()` next needs to run on its own. `None` means nothing is
+    /// pending: the host sleeps until a key, command or load wakes it.
+    pub fn poll_interval(&self) -> Option<Duration> {
+        if self.session.is_some()
+            || self.engine.phase() != Phase::Idle
+            || self.monitor.indicator() != Indicator::Hidden
+        {
+            return Some(ACTIVE_POLL);
+        }
+        self.residency
+            .as_ref()
+            .and_then(|r| r.idle_unload_in())
+            .map(|ms| Duration::from_millis(ms.max(1)))
+    }
+
     /// Advance the whole app by one tick.
     pub fn step(&mut self) {
         for effect in self.engine.poll() {
@@ -226,7 +253,10 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
         self.run_actions();
         // A fault that ended a hands-free Dictation left the engine latched;
         // once nothing is showing any more, the next press must start afresh.
-        if self.engine.phase() == Phase::Latched && self.session.is_none() && self.monitor.indicator() == Indicator::Hidden {
+        if self.engine.phase() == Phase::Latched
+            && self.session.is_none()
+            && self.monitor.indicator() == Indicator::Hidden
+        {
             self.engine.reset();
             self.latched = false;
         }
@@ -297,9 +327,7 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             }
         }
         if let Some(msg) = self.start_gate.check() {
-            self.monitor.start(false);
-            self.monitor.typing_fault(msg);
-            self.monitor.take_actions();
+            self.monitor.refuse_start(msg);
             return;
         }
         let settings = (self.settings)();
@@ -333,7 +361,11 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
                     StreamingConfig::default(),
                     &settings.language,
                 );
-                self.session = Some(Session { insertion, pending: Vec::new(), failed: false });
+                self.session = Some(Session {
+                    insertion,
+                    pending: Vec::new(),
+                    failed: false,
+                });
             }
         }
     }
@@ -385,7 +417,9 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
     fn pump_pending(&mut self) {
         let chunk = (self.config.chunk_ms * 16) as usize;
         loop {
-            let Some(s) = self.session.as_mut() else { return };
+            let Some(s) = self.session.as_mut() else {
+                return;
+            };
             if s.failed || s.pending.len() < chunk {
                 return;
             }
@@ -404,7 +438,11 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
     /// Report a typing fault (sink rejection or model too slow). Returns true if one was raised.
     fn check_typing_faults(&mut self) -> bool {
         let slot = self.typing_faults.take();
-        let model = self.session.as_ref().and_then(|s| s.insertion.fault()).map(|f| f.message().to_string());
+        let model = self
+            .session
+            .as_ref()
+            .and_then(|s| s.insertion.fault())
+            .map(|f| f.message().to_string());
         match slot.or(model) {
             Some(m) => {
                 self.typing_failed(m);
@@ -439,7 +477,9 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
     }
 
     fn finish_session(&mut self, from_monitor: bool) {
-        let Some(mut s) = self.session.take() else { return };
+        let Some(mut s) = self.session.take() else {
+            return;
+        };
         // Whatever the stream still holds (it keeps its samples after a fault).
         let rest = self.capture.read();
         self.capture.stop();
@@ -449,7 +489,10 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
                 s.insertion.feed(&std::mem::take(&mut s.pending));
             }
             s.insertion.end();
-            let fault = self.typing_faults.take().or_else(|| s.insertion.fault().map(|f| f.message().to_string()));
+            let fault = self
+                .typing_faults
+                .take()
+                .or_else(|| s.insertion.fault().map(|f| f.message().to_string()));
             if let Some(m) = fault {
                 if !from_monitor {
                     self.monitor.typing_fault(m);

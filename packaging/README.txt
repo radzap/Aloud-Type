@@ -8,7 +8,7 @@ download a new release.
 
 Run
 ---
-Portable zip: unzip anywhere and run aloud-type.exe. The first start opens Settings,
+Portable zip: unzip anywhere and run aloud-type.exe (keep aloud-type-settings-ui.exe beside it: it is the Settings window). The first start opens Settings,
 where one click downloads the Speech model. The zip never touches the registry unless
 you switch on "Launch at login" in Settings.
 Installer: per-user, needs no administrator rights, adds a Start menu entry.

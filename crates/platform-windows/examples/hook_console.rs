@@ -28,7 +28,10 @@ fn main() {
     let remove = std::env::args().any(|a| a == "remove");
     let t0 = Instant::now();
     let mut removed = false;
-    let cfg = LifecycleConfig { modifier_key: true, ..Default::default() };
+    let cfg = LifecycleConfig {
+        modifier_key: true,
+        ..Default::default()
+    };
     let mut engine = DictationEngine::new(Shared(hook.clone()), Mono(t0), cfg);
     println!("Right Ctrl is the Dictation key. Ctrl+C to quit.");
     let mut seen = 0;

@@ -29,8 +29,11 @@ impl LevelMeter {
         while self.buf.len() >= HOP_SAMPLES {
             let raw = hop_level(&self.buf[..HOP_SAMPLES]);
             self.buf.drain(..HOP_SAMPLES);
-            self.level =
-                if raw > self.level { raw } else { self.level * RELEASE + raw * (1.0 - RELEASE) };
+            self.level = if raw > self.level {
+                raw
+            } else {
+                self.level * RELEASE + raw * (1.0 - RELEASE)
+            };
             out.push(self.level);
         }
         out

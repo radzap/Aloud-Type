@@ -15,7 +15,10 @@ pub struct LifecycleConfig {
 
 impl Default for LifecycleConfig {
     fn default() -> Self {
-        Self { tap_threshold_ms: DEFAULT_TAP_THRESHOLD_MS, modifier_key: false }
+        Self {
+            tap_threshold_ms: DEFAULT_TAP_THRESHOLD_MS,
+            modifier_key: false,
+        }
     }
 }
 
@@ -50,7 +53,13 @@ pub struct DictationEngine<K: Keyboard, C: Clock> {
 
 impl<K: Keyboard, C: Clock> DictationEngine<K, C> {
     pub fn new(keyboard: K, clock: C, config: LifecycleConfig) -> Self {
-        Self { keyboard, clock, config, phase: Phase::Idle, down_at: 0 }
+        Self {
+            keyboard,
+            clock,
+            config,
+            phase: Phase::Idle,
+            down_at: 0,
+        }
     }
 
     /// Change the tap threshold or key kind live (used from the next press).
@@ -117,12 +126,23 @@ mod tests {
     use crate::testing::{FakeClock, FakeKeyboard};
     use Effect::*;
 
-    type Rig = (DictationEngine<FakeKeyboard, FakeClock>, FakeKeyboard, FakeClock);
+    type Rig = (
+        DictationEngine<FakeKeyboard, FakeClock>,
+        FakeKeyboard,
+        FakeClock,
+    );
 
     fn engine(modifier: bool) -> Rig {
         let (kb, clock) = (FakeKeyboard::new(), FakeClock::new());
-        let cfg = LifecycleConfig { modifier_key: modifier, ..Default::default() };
-        (DictationEngine::new(kb.clone(), clock.clone(), cfg), kb, clock)
+        let cfg = LifecycleConfig {
+            modifier_key: modifier,
+            ..Default::default()
+        };
+        (
+            DictationEngine::new(kb.clone(), clock.clone(), cfg),
+            kb,
+            clock,
+        )
     }
 
     #[test]
@@ -173,7 +193,10 @@ mod tests {
     #[test]
     fn threshold_is_configurable() {
         let (kb, clock) = (FakeKeyboard::new(), FakeClock::new());
-        let cfg = LifecycleConfig { tap_threshold_ms: 400, modifier_key: false };
+        let cfg = LifecycleConfig {
+            tap_threshold_ms: 400,
+            modifier_key: false,
+        };
         let mut e = DictationEngine::new(kb.clone(), clock.clone(), cfg);
         kb.press(KeyEvent::DictationKeyDown);
         e.poll();

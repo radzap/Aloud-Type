@@ -3,6 +3,7 @@
 //! hook ignores them; and the foreground-elevation probe.
 use crate::classify::INJECT_TAG;
 use crate::inject::{ElevationProbe, InputBackend, Key, KeyEv};
+use crate::win32::{GetForegroundWindow, GetWindowThreadProcessId};
 
 const INPUT_KEYBOARD: u32 = 1;
 const KEYEVENTF_KEYUP: u32 = 2;
@@ -30,8 +31,6 @@ struct Input {
 #[link(name = "user32")]
 extern "system" {
     fn SendInput(n: u32, inputs: *const Input, size: i32) -> u32;
-    fn GetForegroundWindow() -> isize;
-    fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
 }
 #[link(name = "kernel32")]
 extern "system" {
@@ -42,16 +41,38 @@ extern "system" {
 #[link(name = "advapi32")]
 extern "system" {
     fn OpenProcessToken(process: isize, access: u32, token: *mut isize) -> i32;
-    fn GetTokenInformation(token: isize, class: i32, info: *mut u32, len: u32, ret: *mut u32) -> i32;
+    fn GetTokenInformation(
+        token: isize,
+        class: i32,
+        info: *mut u32,
+        len: u32,
+        ret: *mut u32,
+    ) -> i32;
 }
 
 fn to_input(e: &KeyEv) -> Input {
     let up = if e.up { KEYEVENTF_KEYUP } else { 0 };
     let ki = match e.key {
-        Key::Unit(u) => KeybdInput { vk: 0, scan: u, flags: KEYEVENTF_UNICODE | up, time: 0, extra_info: INJECT_TAG },
-        Key::Return => KeybdInput { vk: VK_RETURN, scan: 0, flags: up, time: 0, extra_info: INJECT_TAG },
+        Key::Unit(u) => KeybdInput {
+            vk: 0,
+            scan: u,
+            flags: KEYEVENTF_UNICODE | up,
+            time: 0,
+            extra_info: INJECT_TAG,
+        },
+        Key::Return => KeybdInput {
+            vk: VK_RETURN,
+            scan: 0,
+            flags: up,
+            time: 0,
+            extra_info: INJECT_TAG,
+        },
     };
-    Input { kind: INPUT_KEYBOARD, ki, _pad: [0] }
+    Input {
+        kind: INPUT_KEYBOARD,
+        ki,
+        _pad: [0],
+    }
 }
 
 /// `SendInput`-based backend.
@@ -61,7 +82,13 @@ pub struct SendInputBackend;
 impl InputBackend for SendInputBackend {
     fn send(&mut self, events: &[KeyEv]) -> usize {
         let inputs: Vec<Input> = events.iter().map(to_input).collect();
-        unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<Input>() as i32) as usize }
+        unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_ptr(),
+                std::mem::size_of::<Input>() as i32,
+            ) as usize
+        }
     }
 }
 

@@ -5,8 +5,7 @@ const POLICY_KEY: &str = r"Software\Policies\Microsoft\Windows\AppPrivacy";
 const POLICY_VALUE: &str = "LetAppsAccessMicrophone";
 const CONSENT_KEY: &str =
     r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
-const CONSENT_NONPACKAGED_KEY: &str =
-    r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged";
+const CONSENT_NONPACKAGED_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone\NonPackaged";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Hive {

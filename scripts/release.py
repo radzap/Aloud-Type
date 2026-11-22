@@ -54,11 +54,14 @@ def main():
         sys.exit("no-network audit failed:\n" + "\n".join(bad))
 
     if not a.skip_build:
-        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "aloud-type-app", "--target", a.target],
+        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "aloud-type-app", "-p", "aloud-type-settings-ui",
+                        "--target", a.target],
                        cwd=ROOT, check=True)
     exe_src = ROOT / "target" / a.target / "release" / "aloud-type.exe"
-    if not exe_src.is_file():
-        sys.exit(f"missing {exe_src}")
+    settings_src = exe_src.with_name("aloud-type-settings-ui.exe")
+    for built in (exe_src, settings_src):
+        if not built.is_file():
+            sys.exit(f"missing {built}")
 
     dist = ROOT / "dist"
     stage = dist / "stage"
@@ -66,6 +69,8 @@ def main():
     stage.mkdir(parents=True)
     exe = shutil.copy2(exe_src, stage / "aloud-type.exe")
     sign(Path(exe))
+    settings_exe = shutil.copy2(settings_src, stage / settings_src.name)
+    sign(Path(settings_exe))
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE")
     (stage / "THIRD-PARTY-NOTICES.txt").write_text(notices.generate(notices.cargo_metadata(ROOT, a.target)),
                                                    encoding="utf-8", newline="\n")
@@ -77,7 +82,7 @@ def main():
         sign(p)
 
     zip_path = dist / f"AloudType-{version}-portable.zip"
-    package.build_zip(zip_path, version=version, exe=stage / "aloud-type.exe", licence=stage / "LICENSE",
+    package.build_zip(zip_path, version=version, exe=stage / "aloud-type.exe", settings_exe=stage / "aloud-type-settings-ui.exe", licence=stage / "LICENSE",
                       notices=stage / "THIRD-PARTY-NOTICES.txt", readme=stage / "README.txt", extra_files=extra)
     print("wrote", zip_path)
 

@@ -25,7 +25,11 @@ pub fn map_error(e: &cpal::Error) -> CaptureError {
     let lower = detail.to_ascii_lowercase();
     let hresult = (lower.contains("access is denied") || lower.contains("80070005"))
         .then_some(E_ACCESSDENIED);
-    CaptureError { kind, hresult, detail }
+    CaptureError {
+        kind,
+        hresult,
+        detail,
+    }
 }
 
 fn convert_i16(data: &[i16]) -> Vec<f32> {
@@ -37,11 +41,16 @@ impl Backend for CpalBackend {
 
     fn list_inputs(&self) -> Vec<DeviceInfo> {
         let host = cpal::default_host();
-        let Ok(devices) = host.input_devices() else { return vec![] };
+        let Ok(devices) = host.input_devices() else {
+            return vec![];
+        };
         devices
             .filter_map(|d| {
                 let id = d.id().ok()?.to_string();
-                let name = d.description().map(|x| x.name().to_string()).unwrap_or_else(|_| id.clone());
+                let name = d
+                    .description()
+                    .map(|x| x.name().to_string())
+                    .unwrap_or_else(|_| id.clone());
                 Some(DeviceInfo { id, name })
             })
             .collect()
@@ -51,12 +60,19 @@ impl Backend for CpalBackend {
         let host = cpal::default_host();
         let dev = match device {
             None => host.default_input_device(),
-            Some(id) => id.parse::<DeviceId>().ok().and_then(|id| host.device_by_id(&id)),
+            Some(id) => id
+                .parse::<DeviceId>()
+                .ok()
+                .and_then(|id| host.device_by_id(&id)),
         }
         .ok_or_else(|| CaptureError::new(CaptureErrorKind::DeviceNotAvailable))?;
 
         let supported = dev.default_input_config().map_err(|e| map_error(&e))?;
-        let (rate, channels, format) = (supported.sample_rate(), supported.channels(), supported.sample_format());
+        let (rate, channels, format) = (
+            supported.sample_rate(),
+            supported.channels(),
+            supported.sample_format(),
+        );
         let config = cpal::StreamConfig {
             channels,
             sample_rate: rate,
@@ -91,7 +107,8 @@ mod tests {
 
     #[test]
     fn access_denied_text_is_recovered_as_hresult() {
-        let e = cpal::Error::with_message(ErrorKind::BackendError, "Access is denied. (os error 5)");
+        let e =
+            cpal::Error::with_message(ErrorKind::BackendError, "Access is denied. (os error 5)");
         assert_eq!(map_error(&e).hresult, Some(E_ACCESSDENIED));
     }
 

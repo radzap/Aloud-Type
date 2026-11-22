@@ -57,7 +57,10 @@ pub fn acquire(name: &str) -> std::io::Result<Launch> {
             CloseHandle(mutex);
             Ok(Launch::Second)
         } else {
-            Ok(Launch::First(InstanceGuard { _mutex: mutex, event }))
+            Ok(Launch::First(InstanceGuard {
+                _mutex: mutex,
+                event,
+            }))
         }
     }
 }
@@ -85,12 +88,15 @@ mod tests {
     #[test]
     fn second_launch_asks_the_first_to_open_settings_and_exits() {
         let name = format!("AloudTypeTest{}", std::process::id());
-        let Launch::First(guard) = acquire(&name).unwrap() else { panic!("expected first") };
+        let Launch::First(guard) = acquire(&name).unwrap() else {
+            panic!("expected first")
+        };
         let (tx, rx) = channel();
         guard.on_open_settings(move || {
             let _ = tx.send(());
         });
         assert!(matches!(acquire(&name).unwrap(), Launch::Second));
-        rx.recv_timeout(Duration::from_secs(5)).expect("first instance was asked to open Settings");
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("first instance was asked to open Settings");
     }
 }

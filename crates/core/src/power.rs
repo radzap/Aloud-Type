@@ -19,7 +19,10 @@ pub enum PowerAction {
 pub fn on_power(event: PowerEvent) -> Vec<PowerAction> {
     match event {
         PowerEvent::Suspend => vec![PowerAction::EndDictation, PowerAction::CloseAudio],
-        PowerEvent::Resume => vec![PowerAction::ReinstallHook, PowerAction::ReenumerateMicrophones],
+        PowerEvent::Resume => vec![
+            PowerAction::ReinstallHook,
+            PowerAction::ReenumerateMicrophones,
+        ],
     }
 }
 
@@ -55,14 +58,20 @@ mod tests {
 
     #[test]
     fn suspend_ends_dictation_then_closes_audio() {
-        assert_eq!(on_power(PowerEvent::Suspend), vec![PowerAction::EndDictation, PowerAction::CloseAudio]);
+        assert_eq!(
+            on_power(PowerEvent::Suspend),
+            vec![PowerAction::EndDictation, PowerAction::CloseAudio]
+        );
     }
 
     #[test]
     fn resume_reinstalls_hook_and_reenumerates_microphones() {
         assert_eq!(
             on_power(PowerEvent::Resume),
-            vec![PowerAction::ReinstallHook, PowerAction::ReenumerateMicrophones]
+            vec![
+                PowerAction::ReinstallHook,
+                PowerAction::ReenumerateMicrophones
+            ]
         );
     }
 }

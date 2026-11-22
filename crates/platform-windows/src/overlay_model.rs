@@ -35,7 +35,10 @@ pub struct Placement {
 }
 impl Default for Placement {
     fn default() -> Self {
-        Self { vertical: Vertical::Bottom, horizontal: Horizontal::Center }
+        Self {
+            vertical: Vertical::Bottom,
+            horizontal: Horizontal::Center,
+        }
     }
 }
 
@@ -117,7 +120,10 @@ impl Placement {
             "right" => Horizontal::Right,
             _ => return None,
         };
-        Some(Self { vertical, horizontal })
+        Some(Self {
+            vertical,
+            horizontal,
+        })
     }
 }
 
@@ -255,7 +261,9 @@ pub fn look(ind: &Indicator, style: Style) -> Option<Look> {
             }
             Some(l)
         }
-        Indicator::ListeningFault { reason, message, .. } => {
+        Indicator::ListeningFault {
+            reason, message, ..
+        } => {
             let hint = hint(*reason);
             let (w, h) = match (style, hint.is_empty()) {
                 (Style::TraceStrip, false) => (RED_W, RED_H),
@@ -268,12 +276,17 @@ pub fn look(ind: &Indicator, style: Style) -> Option<Look> {
             if style == Style::Orb {
                 l.glyph = Glyph::Orb;
                 l.inset = (6.0 + ORB_FAULT_D + 10.0, 16.0);
-                l.one_line = l.title.chars().count() <= ((w - l.inset.0 - l.inset.1) / CHAR_W).floor() as usize;
+                l.one_line = l.title.chars().count()
+                    <= ((w - l.inset.0 - l.inset.1) / CHAR_W).floor() as usize;
             }
             Some(l)
         }
         Indicator::TypingFault { message } => {
-            let w = if style == Style::Orb { ORB_FAULT_W } else { AMBER_W };
+            let w = if style == Style::Orb {
+                ORB_FAULT_W
+            } else {
+                AMBER_W
+            };
             let mut l = base(style, Tone::Amber, message, "", w, 0.0);
             l.h = match (l.one_line, style) {
                 (true, Style::Orb) => ORB_FAULT_H,
@@ -398,7 +411,10 @@ impl Animator {
 
     pub fn tick(&mut self, now: Millis) -> Option<Frame> {
         // A stalled timer must not skip the animation.
-        let dt = self.last_tick.map(|t| now.saturating_sub(t).min(100) as f32).unwrap_or(0.0);
+        let dt = self
+            .last_tick
+            .map(|t| now.saturating_sub(t).min(100) as f32)
+            .unwrap_or(0.0);
         self.last_tick = Some(now);
         if self.target.is_some() {
             self.opacity = (self.opacity + dt / FADE_IN_MS).min(1.0);
@@ -411,7 +427,11 @@ impl Animator {
             }
         }
         // Fast attack, slow release.
-        let tau = if self.level_target > self.level { ATTACK_TAU_MS } else { RELEASE_TAU_MS };
+        let tau = if self.level_target > self.level {
+            ATTACK_TAU_MS
+        } else {
+            RELEASE_TAU_MS
+        };
         self.level += (self.level_target - self.level) * (1.0 - (-dt / tau).exp());
         self.trace.copy_within(1.., 0);
         self.trace[TRACE_LEN - 1] = self.level;
@@ -445,14 +465,20 @@ impl Animator {
 
 /// Pixel size of a frame at the given scale (DPI / 96).
 pub fn pixel_size(f: &Frame, scale: f32) -> (usize, usize) {
-    ((f.w * scale).round().max(1.0) as usize, (f.h * scale).round().max(1.0) as usize)
+    (
+        (f.w * scale).round().max(1.0) as usize,
+        (f.h * scale).round().max(1.0) as usize,
+    )
 }
 
 /// Anti-aliased coverage of pixel (x, y) inside a rounded rectangle at
 /// (rx, ry) of size rw x rh with corner radius r (all in pixels).
 fn rrect_coverage(x: usize, y: usize, rx: f32, ry: f32, rw: f32, rh: f32, r: f32) -> f32 {
     let r = r.min(rw / 2.0).min(rh / 2.0).max(0.0);
-    let (px, py) = (x as f32 + 0.5 - rx - rw / 2.0, y as f32 + 0.5 - ry - rh / 2.0);
+    let (px, py) = (
+        x as f32 + 0.5 - rx - rw / 2.0,
+        y as f32 + 0.5 - ry - rh / 2.0,
+    );
     let (hx, hy) = (rw / 2.0 - r, rh / 2.0 - r);
     let (qx, qy) = ((px.abs() - hx).max(0.0), (py.abs() - hy).max(0.0));
     let d = (qx * qx + qy * qy).sqrt() - r;
@@ -460,7 +486,10 @@ fn rrect_coverage(x: usize, y: usize, rx: f32, ry: f32, rw: f32, rh: f32, r: f32
 }
 
 fn pack(a: f32, r: f32, g: f32, b: f32) -> u32 {
-    ((a.round() as u32) << 24) | ((r.round() as u32) << 16) | ((g.round() as u32) << 8) | b.round() as u32
+    ((a.round() as u32) << 24)
+        | ((r.round() as u32) << 16)
+        | ((g.round() as u32) << 8)
+        | b.round() as u32
 }
 
 /// Source-over blend of colour `c` at opacity `a` onto a premultiplied pixel.
@@ -476,7 +505,15 @@ fn blend(dst: u32, c: [f32; 3], a: f32) -> u32 {
 
 /// Fills an anti-aliased rounded rectangle (a circle when r = w/2 = h/2).
 #[allow(clippy::too_many_arguments)]
-fn fill_rrect(px: &mut [u32], w: usize, h: usize, rect: (f32, f32, f32, f32), r: f32, c: [f32; 3], alpha: f32) {
+fn fill_rrect(
+    px: &mut [u32],
+    w: usize,
+    h: usize,
+    rect: (f32, f32, f32, f32),
+    r: f32,
+    c: [f32; 3],
+    alpha: f32,
+) {
     let (rx, ry, rw, rh) = rect;
     let x0 = rx.floor().max(0.0) as usize;
     let y0 = ry.floor().max(0.0) as usize;
@@ -492,7 +529,14 @@ fn fill_rrect(px: &mut [u32], w: usize, h: usize, rect: (f32, f32, f32, f32), r:
     }
 }
 
-fn fill_circle(px: &mut [u32], w: usize, h: usize, cx: f32, cy: f32, r: f32, c: [f32; 3], alpha: f32) {
+fn fill_circle(
+    px: &mut [u32],
+    w: usize,
+    h: usize,
+    (cx, cy, r): (f32, f32, f32),
+    c: [f32; 3],
+    alpha: f32,
+) {
     fill_rrect(px, w, h, (cx - r, cy - r, 2.0 * r, 2.0 * r), r, c, alpha);
 }
 
@@ -501,7 +545,11 @@ fn orb_geometry(f: &Frame, w: usize, h: usize, scale: f32) -> (f32, f32, f32) {
     if f.look.tone == Tone::Neutral {
         (w as f32 / 2.0, h as f32 / 2.0, w.min(h) as f32)
     } else {
-        ((6.0 + ORB_FAULT_D / 2.0) * scale, h as f32 / 2.0, ORB_FAULT_D * scale)
+        (
+            (6.0 + ORB_FAULT_D / 2.0) * scale,
+            h as f32 / 2.0,
+            ORB_FAULT_D * scale,
+        )
     }
 }
 
@@ -518,8 +566,14 @@ pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
     if !f.look.bodyless {
         for y in 0..h {
             for x in 0..w {
-                let c = rrect_coverage(x, y, 0.0, 0.0, w as f32, h as f32, radius) * bg[3] as f32 / 255.0;
-                px[y * w + x] = pack(c * 255.0, bg[0] as f32 * c, bg[1] as f32 * c, bg[2] as f32 * c);
+                let c = rrect_coverage(x, y, 0.0, 0.0, w as f32, h as f32, radius) * bg[3] as f32
+                    / 255.0;
+                px[y * w + x] = pack(
+                    c * 255.0,
+                    bg[0] as f32 * c,
+                    bg[1] as f32 * c,
+                    bg[2] as f32 * c,
+                );
             }
         }
     }
@@ -539,7 +593,15 @@ pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
                 let v = f.trace[TRACE_LEN - 1 - d * 2] * (1.0 - d as f32 * 0.12);
                 let bh = (v.clamp(0.0, 1.0) * ch).max(bw);
                 let x = ox + i as f32 * (bw + gap) + gap / 2.0;
-                fill_rrect(&mut px, w, h, (x, oy + (ch - bh) / 2.0, bw, bh), bw / 2.0, [255.0; 3], 1.0);
+                fill_rrect(
+                    &mut px,
+                    w,
+                    h,
+                    (x, oy + (ch - bh) / 2.0, bw, bh),
+                    bw / 2.0,
+                    [255.0; 3],
+                    1.0,
+                );
             }
         }
         Glyph::Orb => {
@@ -548,10 +610,17 @@ pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
             if f.look.tone == Tone::Neutral {
                 // Halo grows with loudness; the inner disc stays steady.
                 let v = f.level.clamp(0.0, 1.0);
-                fill_circle(&mut px, w, h, cx, cy, r0 + v * (d / 2.0 - r0), [80.0, 140.0, 255.0], 0.25 + v * 0.35);
-                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [20.0, 20.0, 24.0], 0.9);
+                fill_circle(
+                    &mut px,
+                    w,
+                    h,
+                    (cx, cy, r0 + v * (d / 2.0 - r0)),
+                    [80.0, 140.0, 255.0],
+                    0.25 + v * 0.35,
+                );
+                fill_circle(&mut px, w, h, (cx, cy, r0 * 1.15), [20.0, 20.0, 24.0], 0.9);
             } else {
-                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [0.0; 3], 0.18);
+                fill_circle(&mut px, w, h, (cx, cy, r0 * 1.15), [0.0; 3], 0.18);
             }
         }
     }
@@ -560,13 +629,16 @@ pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
 
 fn render_trace(px: &mut [u32], w: usize, h: usize, f: &Frame, scale: f32) {
     // Canvas inset 8 x 3 logical pixels, bars grow from the middle row.
-    let (padx, pady) = ((8.0 * scale).round() as usize, (3.0 * scale).round() as usize);
+    let (padx, pady) = (
+        (8.0 * scale).round() as usize,
+        (3.0 * scale).round() as usize,
+    );
     let (cw, ch) = (w.saturating_sub(2 * padx), h.saturating_sub(2 * pady));
-    for i in 0..TRACE_LEN {
+    for (i, &level) in f.trace.iter().enumerate().take(TRACE_LEN) {
         let x0 = padx + i * cw / TRACE_LEN;
         let x1 = padx + (i + 1) * cw / TRACE_LEN;
         let x1 = if x1 - x0 > 1 { x1 - 1 } else { x1 };
-        let bh = (f.trace[i].clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
+        let bh = (level.clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
         let top = (pady as f32 + (ch as f32 - bh) / 2.0).round() as usize;
         let bot = ((pady as f32 + (ch as f32 + bh) / 2.0).round() as usize).min(h);
         let a = 0.35 + 0.65 * (i as f32 / TRACE_LEN as f32);
@@ -584,7 +656,11 @@ pub fn restore_alpha(rendered: &[u32], drawn: &mut [u32]) {
     for (d, r) in drawn.iter_mut().zip(rendered) {
         let a = r >> 24;
         let k = a as f32 / 255.0;
-        let (rr, gg, bb) = ((*d >> 16 & 255) as f32 * k, (*d >> 8 & 255) as f32 * k, (*d & 255) as f32 * k);
+        let (rr, gg, bb) = (
+            (*d >> 16 & 255) as f32 * k,
+            (*d >> 8 & 255) as f32 * k,
+            (*d & 255) as f32 * k,
+        );
         *d = pack(a as f32, rr, gg, bb);
     }
 }
@@ -607,7 +683,10 @@ pub fn text_lines(f: &Frame, scale: f32) -> Vec<TextLine> {
     }
     let (w, h) = pixel_size(f, scale);
     let (_, fg) = f.look.tone.colors();
-    let (left, right) = ((f.look.inset.0 * scale).round() as i32, (f.look.inset.1 * scale).round() as i32);
+    let (left, right) = (
+        (f.look.inset.0 * scale).round() as i32,
+        (f.look.inset.1 * scale).round() as i32,
+    );
     let r = |top: f32, bottom: f32| Rect {
         left,
         top: (top * scale).round() as i32,
@@ -628,8 +707,20 @@ pub fn text_lines(f: &Frame, scale: f32) -> Vec<TextLine> {
     } else {
         // Title (19) and hint (17) with a 2 px gap, centred vertically.
         let top = (f.look.h - 38.0) / 2.0;
-        out.push(TextLine { text: f.look.title.clone(), rect: r(top, top + 19.0), font_px: 14.0 * scale, bold: true, color: fg });
-        out.push(TextLine { text: f.look.hint.clone(), rect: r(top + 21.0, top + 38.0), font_px: 12.0 * scale, bold: false, color: fg });
+        out.push(TextLine {
+            text: f.look.title.clone(),
+            rect: r(top, top + 19.0),
+            font_px: 14.0 * scale,
+            bold: true,
+            color: fg,
+        });
+        out.push(TextLine {
+            text: f.look.hint.clone(),
+            rect: r(top + 21.0, top + 38.0),
+            font_px: 12.0 * scale,
+            bold: false,
+            color: fg,
+        });
     }
     out
 }
@@ -642,10 +733,16 @@ mod tests {
         Indicator::Listening { level, note: None }
     }
     fn red(reason: FaultReason) -> Indicator {
-        Indicator::ListeningFault { reason, message: reason.message(), recoverable: reason.is_recoverable() }
+        Indicator::ListeningFault {
+            reason,
+            message: reason.message(),
+            recoverable: reason.is_recoverable(),
+        }
     }
     fn amber(m: &str) -> Indicator {
-        Indicator::TypingFault { message: m.to_string() }
+        Indicator::TypingFault {
+            message: m.to_string(),
+        }
     }
 
     #[test]
@@ -779,9 +876,21 @@ mod tests {
     fn amber_typing_fault_is_amber_and_sized_to_its_message() {
         let short = look(&amber("Couldn't type into this window"), Style::TraceStrip).unwrap();
         assert_eq!((short.tone, short.h), (Tone::Amber, AMBER_H_ONE_LINE));
-        let long = look(&amber("Speech model is too slow for this PC. Choose a smaller model in Settings."), Style::TraceStrip).unwrap();
+        let long = look(
+            &amber("Speech model is too slow for this PC. Choose a smaller model in Settings."),
+            Style::TraceStrip,
+        )
+        .unwrap();
         assert_eq!((long.tone, long.h), (Tone::Amber, AMBER_H_TWO_LINES));
-        assert_eq!(look(&amber("Can't type into an administrator window"), Style::TraceStrip).unwrap().h, AMBER_H_TWO_LINES);
+        assert_eq!(
+            look(
+                &amber("Can't type into an administrator window"),
+                Style::TraceStrip
+            )
+            .unwrap()
+            .h,
+            AMBER_H_TWO_LINES
+        );
     }
 
     #[test]
@@ -802,31 +911,56 @@ mod tests {
     #[test]
     fn normal_listening_is_the_small_dark_trace_strip_and_a_note_shows_text() {
         let l = look(&listening(0.2), Style::TraceStrip).unwrap();
-        assert_eq!((l.tone, l.glyph, l.w, l.h), (Tone::Neutral, Glyph::Trace, STRIP_W, STRIP_H));
+        assert_eq!(
+            (l.tone, l.glyph, l.w, l.h),
+            (Tone::Neutral, Glyph::Trace, STRIP_W, STRIP_H)
+        );
         let n = look(
-            &Indicator::Listening { level: 0.2, note: Some("Microphone not found, using the system default") },
+            &Indicator::Listening {
+                level: 0.2,
+                note: Some("Using default microphone"),
+            },
             Style::TraceStrip,
         )
         .unwrap();
         assert_eq!(n.glyph, Glyph::None);
-        assert_eq!(n.title, "Microphone not found, using the system default");
+        assert_eq!(n.title, "Using default microphone");
     }
 
     #[test]
     fn bottom_center_sits_centered_above_the_taskbar() {
-        let work = Rect { left: 0, top: 0, right: 1920, bottom: 1040 };
+        let work = Rect {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
         assert_eq!(place(work, 150, 22, Placement::default(), 1.0), (885, 1002));
     }
 
     #[test]
     fn placement_follows_the_monitor_work_area_and_dpi() {
-        let second = Rect { left: 1920, top: 100, right: 3840, bottom: 1140 };
+        let second = Rect {
+            left: 1920,
+            top: 100,
+            right: 3840,
+            bottom: 1140,
+        };
         let (x, y) = place(second, 300, 44, Placement::default(), 2.0);
         assert_eq!((x, y), (1920 + 810, 1140 - 32 - 44));
-        let top_left = Placement { vertical: Vertical::Top, horizontal: Horizontal::Left };
+        let top_left = Placement {
+            vertical: Vertical::Top,
+            horizontal: Horizontal::Left,
+        };
         assert_eq!(place(second, 300, 44, top_left, 1.0), (1936, 116));
-        let right = Placement { vertical: Vertical::Bottom, horizontal: Horizontal::Right };
-        assert_eq!(place(second, 300, 44, right, 1.0), (3840 - 16 - 300, 1140 - 16 - 44));
+        let right = Placement {
+            vertical: Vertical::Bottom,
+            horizontal: Horizontal::Right,
+        };
+        assert_eq!(
+            place(second, 300, 44, right, 1.0),
+            (3840 - 16 - 300, 1140 - 16 - 44)
+        );
     }
 
     fn frame_with(level: f32) -> Frame {
@@ -842,7 +976,9 @@ mod tests {
     }
 
     fn lit_in_column(buf: &[u32], w: usize, h: usize, x: usize) -> usize {
-        (0..h).filter(|&y| (buf[y * w + x] >> 8 & 255) > 200).count()
+        (0..h)
+            .filter(|&y| (buf[y * w + x] >> 8 & 255) > 200)
+            .count()
     }
 
     #[test]
@@ -896,7 +1032,12 @@ mod tests {
         assert_eq!(lines[0].text, "No microphone found");
         assert_eq!(lines[1].text, "Plug one in or pick one in Settings");
         for l in &lines {
-            assert!(l.rect.left >= 0 && l.rect.right <= 280 && l.rect.bottom <= 66 && l.rect.top < l.rect.bottom);
+            assert!(
+                l.rect.left >= 0
+                    && l.rect.right <= 280
+                    && l.rect.bottom <= 66
+                    && l.rect.top < l.rect.bottom
+            );
         }
         let mut b = Animator::new();
         b.set(&amber("Couldn't type into this window"), 0);
@@ -947,7 +1088,10 @@ mod tests {
         assert_eq!(Style::from_setting("nope"), None);
         assert_eq!(
             Placement::from_settings("top", "right"),
-            Some(Placement { vertical: Vertical::Top, horizontal: Horizontal::Right })
+            Some(Placement {
+                vertical: Vertical::Top,
+                horizontal: Horizontal::Right
+            })
         );
         assert_eq!(Placement::from_settings("middle", "left"), None);
     }
@@ -966,12 +1110,22 @@ mod tests {
     #[test]
     fn pill_fault_is_a_wide_pill_with_reason_and_hint_and_fits_its_text() {
         let l = look(&red(FaultReason::Blocked), Style::BarPill).unwrap();
-        assert_eq!((l.tone, l.shape, l.w, l.h), (Tone::Red, Shape::Pill, 300.0, 52.0));
+        assert_eq!(
+            (l.tone, l.shape, l.w, l.h),
+            (Tone::Red, Shape::Pill, 300.0, 52.0)
+        );
         assert!(l.one_line);
-        assert_eq!(look(&red(FaultReason::MicrophoneError), Style::BarPill).unwrap().h, 40.0);
+        assert_eq!(
+            look(&red(FaultReason::MicrophoneError), Style::BarPill)
+                .unwrap()
+                .h,
+            40.0
+        );
         let f = styled(&red(FaultReason::Blocked), Style::BarPill, 400);
         for t in text_lines(&f, 1.0) {
-            assert!(t.rect.left >= 20 && t.rect.right <= 280 && t.rect.top >= 0 && t.rect.bottom <= 52);
+            assert!(
+                t.rect.left >= 20 && t.rect.right <= 280 && t.rect.top >= 0 && t.rect.bottom <= 52
+            );
         }
     }
 
@@ -1065,7 +1219,11 @@ mod tests {
 
     #[test]
     fn dpi_scales_every_style() {
-        for (s, w, h) in [(Style::BarPill, 114, 39), (Style::Orb, 60, 60), (Style::TraceStrip, 225, 33)] {
+        for (s, w, h) in [
+            (Style::BarPill, 114, 39),
+            (Style::Orb, 60, 60),
+            (Style::TraceStrip, 225, 33),
+        ] {
             let (rw, rh, px) = render(&styled(&listening(0.5), s, 400), 1.5);
             assert_eq!((rw, rh), (w, h), "{s:?}");
             assert_eq!(px.len(), w * h);
@@ -1077,27 +1235,66 @@ mod tests {
     #[test]
     fn all_six_positions_sit_inside_the_work_area_beside_the_taskbar() {
         // Taskbar on the left (work area starts at x = 48) of a 1920x1080 monitor.
-        let work = Rect { left: 48, top: 0, right: 1920, bottom: 1080 };
+        let work = Rect {
+            left: 48,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+        };
         let (w, h) = (300, 56);
         let cases = [
             (Vertical::Top, Horizontal::Left, (64, 16)),
-            (Vertical::Top, Horizontal::Center, (48 + (1872 - 300) / 2, 16)),
+            (
+                Vertical::Top,
+                Horizontal::Center,
+                (48 + (1872 - 300) / 2, 16),
+            ),
             (Vertical::Top, Horizontal::Right, (1920 - 16 - 300, 16)),
             (Vertical::Bottom, Horizontal::Left, (64, 1080 - 16 - 56)),
-            (Vertical::Bottom, Horizontal::Center, (48 + (1872 - 300) / 2, 1008)),
+            (
+                Vertical::Bottom,
+                Horizontal::Center,
+                (48 + (1872 - 300) / 2, 1008),
+            ),
             (Vertical::Bottom, Horizontal::Right, (1604, 1008)),
         ];
         for (vertical, horizontal, want) in cases {
-            assert_eq!(place(work, w, h, Placement { vertical, horizontal }, 1.0), want);
+            assert_eq!(
+                place(
+                    work,
+                    w,
+                    h,
+                    Placement {
+                        vertical,
+                        horizontal
+                    },
+                    1.0
+                ),
+                want
+            );
         }
     }
 
     #[test]
     fn margin_scales_with_dpi_in_every_corner() {
-        let work = Rect { left: 0, top: 0, right: 3000, bottom: 2000 };
-        let tl = Placement { vertical: Vertical::Top, horizontal: Horizontal::Left };
-        let br = Placement { vertical: Vertical::Bottom, horizontal: Horizontal::Right };
+        let work = Rect {
+            left: 0,
+            top: 0,
+            right: 3000,
+            bottom: 2000,
+        };
+        let tl = Placement {
+            vertical: Vertical::Top,
+            horizontal: Horizontal::Left,
+        };
+        let br = Placement {
+            vertical: Vertical::Bottom,
+            horizontal: Horizontal::Right,
+        };
         assert_eq!(place(work, 100, 60, tl, 1.5), (24, 24));
-        assert_eq!(place(work, 100, 60, br, 1.5), (3000 - 24 - 100, 2000 - 24 - 60));
+        assert_eq!(
+            place(work, 100, 60, br, 1.5),
+            (3000 - 24 - 100, 2000 - 24 - 60)
+        );
     }
 }

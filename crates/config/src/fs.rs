@@ -59,7 +59,9 @@ pub fn atomic_write(fs: &dyn Fs, path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(".tmp");
     let tmp = path.with_file_name(tmp_name);
-    let result = fs.write_new(&tmp, bytes).and_then(|_| fs.rename(&tmp, path));
+    let result = fs
+        .write_new(&tmp, bytes)
+        .and_then(|_| fs.rename(&tmp, path));
     if result.is_err() {
         let _ = fs.remove(&tmp);
     }

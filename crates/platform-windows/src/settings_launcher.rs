@@ -23,7 +23,10 @@ pub struct SettingsLauncher<S: Spawner> {
 
 impl<S: Spawner> SettingsLauncher<S> {
     pub fn new(spawner: S) -> Self {
-        Self { spawner, child: None }
+        Self {
+            spawner,
+            child: None,
+        }
     }
 
     /// Spawns Settings unless one is already open, in which case that window
@@ -56,17 +59,7 @@ impl Child for ProcessChild {
 
 #[cfg(windows)]
 fn raise_windows_of_process(pid: u32) {
-    use std::ffi::c_void;
-    type Hwnd = *mut c_void;
-    extern "system" {
-        fn EnumWindows(cb: extern "system" fn(Hwnd, isize) -> i32, param: isize) -> i32;
-        fn GetWindowThreadProcessId(h: Hwnd, pid: *mut u32) -> u32;
-        fn IsWindowVisible(h: Hwnd) -> i32;
-        fn IsIconic(h: Hwnd) -> i32;
-        fn ShowWindow(h: Hwnd, cmd: i32) -> i32;
-        fn SetForegroundWindow(h: Hwnd) -> i32;
-        fn AllowSetForegroundWindow(pid: u32) -> i32;
-    }
+    use crate::win32::*;
     extern "system" fn each(h: Hwnd, param: isize) -> i32 {
         unsafe {
             let mut p = 0u32;
@@ -93,7 +86,10 @@ fn raise_windows_of_process(_pid: u32) {}
 impl Spawner for ExeSpawner {
     type Child = ProcessChild;
     fn spawn(&mut self) -> io::Result<ProcessChild> {
-        std::process::Command::new(std::env::current_exe()?).arg("--settings").spawn().map(ProcessChild)
+        std::process::Command::new(std::env::current_exe()?)
+            .arg("--settings")
+            .spawn()
+            .map(ProcessChild)
     }
 }
 
@@ -103,7 +99,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    thread_local!(static RAISED: Cell<u32> = Cell::new(0));
+    thread_local!(static RAISED: Cell<u32> = const { Cell::new(0) });
     struct FakeChild(Rc<Cell<bool>>);
     impl Child for FakeChild {
         fn is_running(&mut self) -> bool {
@@ -132,7 +128,15 @@ mod tests {
     fn launcher(fail: bool) -> (SettingsLauncher<FakeSpawner>, Rc<Cell<bool>>, Rc<Cell<u32>>) {
         let running = Rc::new(Cell::new(false));
         let spawned = Rc::new(Cell::new(0));
-        (SettingsLauncher::new(FakeSpawner { running: running.clone(), spawned: spawned.clone(), fail }), running, spawned)
+        (
+            SettingsLauncher::new(FakeSpawner {
+                running: running.clone(),
+                spawned: spawned.clone(),
+                fail,
+            }),
+            running,
+            spawned,
+        )
     }
 
     #[test]
@@ -148,7 +152,11 @@ mod tests {
         let (mut l, _r, _n) = launcher(false);
         RAISED.with(|r| r.set(0));
         l.open().unwrap();
-        assert_eq!(RAISED.with(|r| r.get()), 0, "a fresh window needs no raising");
+        assert_eq!(
+            RAISED.with(|r| r.get()),
+            0,
+            "a fresh window needs no raising"
+        );
         l.open().unwrap();
         assert_eq!(RAISED.with(|r| r.get()), 1);
     }
