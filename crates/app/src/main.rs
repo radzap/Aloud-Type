@@ -32,7 +32,9 @@ mod host {
     use aloud_type_platform_windows::inject::{check_can_start, FaultSlot, InjectingSink};
     use aloud_type_platform_windows::inject_win::{ForegroundElevation, SendInputBackend};
     use aloud_type_platform_windows::power_win::PowerWatcher;
+    use aloud_type_app::residency::{Loader, Model, Residency};
     use aloud_type_recognizer::{pins, SileroVoiceGate, WhisperRecognizer};
+    use std::sync::Arc;
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::rc::Rc;
@@ -127,27 +129,39 @@ mod host {
         let logger = Logger::new(StdFs, &paths.app_dir, verbose);
         logger.log(clock.now(), Event::new("start"));
 
-        let (Some(model), Some(vad)) =
-            (find_model(&paths, pins::BASE_MODEL_FILE), find_model(&paths, pins::VAD_MODEL_FILE))
-        else {
-            eprintln!(
-                "Speech model not found. Put {} and {} in {} (or set ALOUDTYPE_MODEL_DIR).",
-                pins::BASE_MODEL_FILE,
-                pins::VAD_MODEL_FILE,
-                paths.models_dir().display()
-            );
+        let models_dir = std::env::var_os("ALOUDTYPE_MODEL_DIR").map(PathBuf::from).unwrap_or_else(|| paths.models_dir());
+        let Some(vad) = find_model(&paths, pins::VAD_MODEL_FILE) else {
+            eprintln!("Voice gate model not found. Put {} in {}.", pins::VAD_MODEL_FILE, models_dir.display());
             std::process::exit(1);
         };
-        let recognizer = WhisperRecognizer::load(&model).unwrap_or_else(|e| {
-            eprintln!("Could not load the Speech model: {e}");
-            std::process::exit(1)
-        });
         let gate = SileroVoiceGate::load(&vad).unwrap_or_else(|e| {
             eprintln!("Could not load the voice gate: {e}");
             std::process::exit(1)
         });
 
         let mut settings_file = ConfigFile::<Settings>::open(paths.settings_file());
+        // The Speech model loads on a worker thread; only verified files are loaded.
+        let loader: Loader = {
+            let (dir, legacy) = (models_dir.clone(), find_model(&paths, pins::BASE_MODEL_FILE));
+            Arc::new(move |id: &str| {
+                let info = aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
+                let path = match aloud_type_models::verified_path(&dir, info) {
+                    Ok(p) => p,
+                    // Hand-installed development model (no checksum known for it).
+                    Err(_) if legacy.is_some() && std::env::var_os("ALOUDTYPE_MODEL_DIR").is_some() => legacy.clone().unwrap(),
+                    Err(e) => return Err(format!("{e:?}")),
+                };
+                let m = WhisperRecognizer::load(&path).map_err(|e| e.to_string())?;
+                Ok(Box::new(m) as Model)
+            })
+        };
+        let started = Instant::now();
+        let residency = Residency::start(
+            loader,
+            Arc::new(move || started.elapsed().as_millis() as Millis),
+            &settings_file.value().speech_model,
+            settings_file.value().model_memory,
+        );
         let tap_ms = settings_file.value().tap_threshold_ms as Millis;
 
         let hook = Rc::new(KeyboardHook::start(HookConfig::default()).unwrap_or_else(|e| {
@@ -158,6 +172,7 @@ mod host {
         let power = PowerWatcher::start().ok();
 
         let mut notice = SettingsNotice::new();
+        let res_for_settings = residency.clone();
         let settings = Box::new(move || {
             // Settings are re-read at every Dictation start (no file watcher yet).
             let status = settings_file.reload().clone();
@@ -165,6 +180,8 @@ mod host {
                 println!("notice: {text}");
             }
             let s = settings_file.value();
+            res_for_settings.set_memory(s.model_memory);
+            res_for_settings.request_model(&s.speech_model);
             DictationSettings {
                 language: match &s.language {
                     Language::Auto => "auto".into(),
@@ -179,7 +196,7 @@ mod host {
             clock,
             lifecycle: LifecycleConfig { tap_threshold_ms: tap_ms, modifier_key: true },
             capture: Box::new(MicCapture(AudioCapture::new(CpalBackend, Box::new(WinRegistry)))),
-            recognizer: Box::new(recognizer),
+            recognizer: Box::new(residency.recognizer()),
             voice_gate: Box::new(gate),
             sink: Box::new(sink),
             start_gate: Box::new(ElevatedGate),
@@ -188,6 +205,7 @@ mod host {
             config: ControllerConfig::default(),
         }));
 
+        controller.borrow_mut().set_residency(residency.clone());
         println!("Aloud Type is running. Hold Right Ctrl to dictate (tap to go hands-free). Ctrl+C quits.");
         let supervisor = Mutex::new(Supervisor::new());
         let tracker = RefCell::new(PowerTracker::default());
@@ -196,6 +214,9 @@ mod host {
             {
                 let mut c = controller.borrow_mut();
                 c.step();
+                for n in residency.take_notices() {
+                    println!("notice: {n}");
+                }
                 if let Some(p) = &power {
                     while let Ok(e) = p.events.try_recv() {
                         if let Some(e) = tracker.borrow_mut().observe(e) {
