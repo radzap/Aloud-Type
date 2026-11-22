@@ -83,14 +83,79 @@ impl Tone {
     }
 }
 
+/// The three Listening indicator styles (Settings values `bar-pill`, `orb`,
+/// `trace-strip`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Style {
+    BarPill,
+    Orb,
+    #[default]
+    TraceStrip,
+}
+impl Style {
+    /// From the Settings value; `None` for anything unknown.
+    pub fn from_setting(s: &str) -> Option<Self> {
+        match s {
+            "bar-pill" => Some(Self::BarPill),
+            "orb" => Some(Self::Orb),
+            "trace-strip" => Some(Self::TraceStrip),
+            _ => None,
+        }
+    }
+}
+impl Placement {
+    /// From the Settings values (`top`/`bottom`, `left`/`center`/`right`).
+    pub fn from_settings(vertical: &str, horizontal: &str) -> Option<Self> {
+        let vertical = match vertical {
+            "top" => Vertical::Top,
+            "bottom" => Vertical::Bottom,
+            _ => return None,
+        };
+        let horizontal = match horizontal {
+            "left" => Horizontal::Left,
+            "center" => Horizontal::Center,
+            "right" => Horizontal::Right,
+            _ => return None,
+        };
+        Some(Self { vertical, horizontal })
+    }
+}
+
+/// The loudness graphic a style draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Glyph {
+    None,
+    /// Scrolling envelope (Trace strip).
+    Trace,
+    /// Seven bars, the centre reacting first (Bar pill).
+    Bars,
+    /// A halo that grows with loudness around a steady disc (Orb).
+    Orb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shape {
+    /// Corner radius in logical pixels.
+    Rounded(f32),
+    /// Fully round ends (half the shorter side).
+    Pill,
+}
+
 /// What the overlay should look like for one indicator state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Look {
+    pub style: Style,
     pub tone: Tone,
     pub title: String,
     pub hint: String,
-    /// Draws the loudness trace (normal listening only).
-    pub trace: bool,
+    pub glyph: Glyph,
+    pub shape: Shape,
+    /// No background body (the Orb while listening is just the orb).
+    pub bodyless: bool,
+    /// Logical left and right text insets.
+    pub inset: (f32, f32),
+    /// The title fits on one line.
+    pub one_line: bool,
     /// Logical size in pixels at 96 dpi.
     pub w: f32,
     pub h: f32,
@@ -106,7 +171,17 @@ pub const AMBER_H_ONE_LINE: f32 = 44.0;
 pub const AMBER_H_TWO_LINES: f32 = 62.0;
 pub const NOTE_W: f32 = 300.0;
 pub const NOTE_H: f32 = 36.0;
-const ONE_LINE_CHARS: usize = 38;
+pub const PILL_W: f32 = 76.0;
+pub const PILL_H: f32 = 26.0;
+pub const PILL_FAULT_W: f32 = 300.0;
+pub const PILL_FAULT_H: f32 = 52.0;
+pub const PILL_FAULT_H_NO_HINT: f32 = 40.0;
+pub const ORB_D: f32 = 40.0;
+pub const ORB_FAULT_D: f32 = 44.0;
+pub const ORB_FAULT_W: f32 = 310.0;
+pub const ORB_FAULT_H: f32 = 56.0;
+/// Approximate width of one character of the 13 px bold UI font.
+const CHAR_W: f32 = 7.15;
 
 /// Second line shown under a Listening fault's reason.
 pub fn hint(reason: FaultReason) -> &'static str {
@@ -121,42 +196,92 @@ pub fn hint(reason: FaultReason) -> &'static str {
     }
 }
 
-fn strip() -> Look {
-    Look { tone: Tone::Neutral, title: String::new(), hint: String::new(), trace: true, w: STRIP_W, h: STRIP_H }
+fn base(style: Style, tone: Tone, title: &str, hint: &str, w: f32, h: f32) -> Look {
+    let (shape, inset) = match style {
+        Style::TraceStrip => (Shape::Rounded(8.0), (14.0, 14.0)),
+        Style::BarPill => (Shape::Pill, (20.0, 20.0)),
+        Style::Orb => (Shape::Rounded(14.0), (14.0, 14.0)),
+    };
+    let chars = ((w - inset.0 - inset.1) / CHAR_W).floor() as usize;
+    Look {
+        style,
+        tone,
+        title: title.to_string(),
+        hint: hint.to_string(),
+        glyph: Glyph::None,
+        shape,
+        bodyless: false,
+        inset,
+        one_line: title.chars().count() <= chars,
+        w,
+        h,
+    }
+}
+
+fn listening_look(style: Style) -> Look {
+    let (w, h) = match style {
+        Style::TraceStrip => (STRIP_W, STRIP_H),
+        Style::BarPill => (PILL_W, PILL_H),
+        Style::Orb => (ORB_D, ORB_D),
+    };
+    let mut l = base(style, Tone::Neutral, "", "", w, h);
+    match style {
+        Style::TraceStrip => l.glyph = Glyph::Trace,
+        Style::BarPill => l.glyph = Glyph::Bars,
+        Style::Orb => {
+            l.glyph = Glyph::Orb;
+            l.shape = Shape::Pill;
+            l.bodyless = true;
+        }
+    }
+    l
+}
+
+/// Size of the indicator while listening normally; faults grow from it.
+pub fn idle_size(style: Style) -> (f32, f32) {
+    let l = listening_look(style);
+    (l.w, l.h)
 }
 
 /// The look for an indicator state; `None` when the overlay must be hidden.
-pub fn look(ind: &Indicator) -> Option<Look> {
+pub fn look(ind: &Indicator, style: Style) -> Option<Look> {
     match ind {
         Indicator::Hidden => None,
-        Indicator::Listening { note: None, .. } => Some(strip()),
-        Indicator::Listening { note: Some(n), .. } => Some(Look {
-            tone: Tone::Neutral,
-            title: (*n).to_string(),
-            hint: String::new(),
-            trace: false,
-            w: NOTE_W,
-            h: NOTE_H,
-        }),
+        Indicator::Listening { note: None, .. } => Some(listening_look(style)),
+        Indicator::Listening { note: Some(n), .. } => {
+            let mut l = base(style, Tone::Neutral, n, "", NOTE_W, NOTE_H);
+            if style == Style::Orb {
+                l.shape = Shape::Pill;
+            }
+            Some(l)
+        }
         Indicator::ListeningFault { reason, message, .. } => {
             let hint = hint(*reason);
-            Some(Look {
-                tone: Tone::Red,
-                title: (*message).to_string(),
-                hint: hint.to_string(),
-                trace: false,
-                w: RED_W,
-                h: if hint.is_empty() { RED_H_NO_HINT } else { RED_H },
-            })
+            let (w, h) = match (style, hint.is_empty()) {
+                (Style::TraceStrip, false) => (RED_W, RED_H),
+                (Style::TraceStrip, true) => (RED_W, RED_H_NO_HINT),
+                (Style::BarPill, false) => (PILL_FAULT_W, PILL_FAULT_H),
+                (Style::BarPill, true) => (PILL_FAULT_W, PILL_FAULT_H_NO_HINT),
+                (Style::Orb, _) => (ORB_FAULT_W, ORB_FAULT_H),
+            };
+            let mut l = base(style, Tone::Red, message, hint, w, h);
+            if style == Style::Orb {
+                l.glyph = Glyph::Orb;
+                l.inset = (6.0 + ORB_FAULT_D + 10.0, 16.0);
+                l.one_line = l.title.chars().count() <= ((w - l.inset.0 - l.inset.1) / CHAR_W).floor() as usize;
+            }
+            Some(l)
         }
-        Indicator::TypingFault { message } => Some(Look {
-            tone: Tone::Amber,
-            title: message.clone(),
-            hint: String::new(),
-            trace: false,
-            w: AMBER_W,
-            h: if message.chars().count() <= ONE_LINE_CHARS { AMBER_H_ONE_LINE } else { AMBER_H_TWO_LINES },
-        }),
+        Indicator::TypingFault { message } => {
+            let w = if style == Style::Orb { ORB_FAULT_W } else { AMBER_W };
+            let mut l = base(style, Tone::Amber, message, "", w, 0.0);
+            l.h = match (l.one_line, style) {
+                (true, Style::Orb) => ORB_FAULT_H,
+                (true, _) => AMBER_H_ONE_LINE,
+                (false, _) => AMBER_H_TWO_LINES,
+            };
+            Some(l)
+        }
     }
 }
 
@@ -171,6 +296,8 @@ pub struct Frame {
     pub look: Look,
     /// Smoothed loudness history, oldest first, each 0..=1.
     pub trace: [f32; TRACE_LEN],
+    /// Smoothed current loudness, 0..=1.
+    pub level: f32,
     /// The text is shown once the overlay has mostly grown.
     pub show_text: bool,
 }
@@ -196,6 +323,7 @@ pub struct Animator {
     grow_start: Millis,
     grow_to: (f32, f32),
     last_tick: Option<Millis>,
+    style: Style,
 }
 
 impl Default for Animator {
@@ -218,6 +346,7 @@ impl Animator {
             grow_start: 0,
             grow_to: (STRIP_W, STRIP_H),
             last_tick: None,
+            style: Style::TraceStrip,
         }
     }
 
@@ -226,8 +355,17 @@ impl Animator {
         self.target.is_some() || self.opacity > 0.0
     }
 
+    /// `set_styled` with the default Trace strip style.
     pub fn set(&mut self, ind: &Indicator, now: Millis) {
-        let new = look(ind);
+        self.set_styled(ind, Style::TraceStrip, now);
+    }
+
+    /// Reports the indicator state. `style` is read only when the overlay
+    /// appears: a style change applies to the next Dictation.
+    pub fn set_styled(&mut self, ind: &Indicator, style: Style, now: Millis) {
+        let style = if self.active() { self.style } else { style };
+        self.style = style;
+        let new = look(ind, style);
         self.level_target = match ind {
             Indicator::Listening { level, .. } => level.clamp(0.0, 1.0),
             _ => 0.0,
@@ -242,7 +380,7 @@ impl Animator {
                     self.opacity = 0.0;
                     self.level = 0.0;
                     self.trace = [0.0; TRACE_LEN];
-                    self.size = (STRIP_W, STRIP_H);
+                    self.size = idle_size(style);
                     self.grow_to = self.size;
                     self.last_tick = None;
                 }
@@ -300,6 +438,7 @@ impl Animator {
             show_text: !look.title.is_empty() && progress >= 0.5,
             look,
             trace: self.trace,
+            level: self.level,
         })
     }
 }
@@ -309,9 +448,12 @@ pub fn pixel_size(f: &Frame, scale: f32) -> (usize, usize) {
     ((f.w * scale).round().max(1.0) as usize, (f.h * scale).round().max(1.0) as usize)
 }
 
-fn coverage(x: usize, y: usize, w: usize, h: usize, r: f32) -> f32 {
-    let (px, py) = (x as f32 + 0.5 - w as f32 / 2.0, y as f32 + 0.5 - h as f32 / 2.0);
-    let (hx, hy) = (w as f32 / 2.0 - r, h as f32 / 2.0 - r);
+/// Anti-aliased coverage of pixel (x, y) inside a rounded rectangle at
+/// (rx, ry) of size rw x rh with corner radius r (all in pixels).
+fn rrect_coverage(x: usize, y: usize, rx: f32, ry: f32, rw: f32, rh: f32, r: f32) -> f32 {
+    let r = r.min(rw / 2.0).min(rh / 2.0).max(0.0);
+    let (px, py) = (x as f32 + 0.5 - rx - rw / 2.0, y as f32 + 0.5 - ry - rh / 2.0);
+    let (hx, hy) = (rw / 2.0 - r, rh / 2.0 - r);
     let (qx, qy) = ((px.abs() - hx).max(0.0), (py.abs() - hy).max(0.0));
     let d = (qx * qx + qy * qy).sqrt() - r;
     (0.5 - d).clamp(0.0, 1.0)
@@ -321,43 +463,119 @@ fn pack(a: f32, r: f32, g: f32, b: f32) -> u32 {
     ((a.round() as u32) << 24) | ((r.round() as u32) << 16) | ((g.round() as u32) << 8) | b.round() as u32
 }
 
-/// Renders the background shape and the trace (not the text) into a
+/// Source-over blend of colour `c` at opacity `a` onto a premultiplied pixel.
+fn blend(dst: u32, c: [f32; 3], a: f32) -> u32 {
+    let k = 1.0 - a;
+    pack(
+        (dst >> 24) as f32 * k + 255.0 * a,
+        (dst >> 16 & 255) as f32 * k + c[0] * a,
+        (dst >> 8 & 255) as f32 * k + c[1] * a,
+        (dst & 255) as f32 * k + c[2] * a,
+    )
+}
+
+/// Fills an anti-aliased rounded rectangle (a circle when r = w/2 = h/2).
+#[allow(clippy::too_many_arguments)]
+fn fill_rrect(px: &mut [u32], w: usize, h: usize, rect: (f32, f32, f32, f32), r: f32, c: [f32; 3], alpha: f32) {
+    let (rx, ry, rw, rh) = rect;
+    let x0 = rx.floor().max(0.0) as usize;
+    let y0 = ry.floor().max(0.0) as usize;
+    let x1 = ((rx + rw).ceil().max(0.0) as usize).min(w);
+    let y1 = ((ry + rh).ceil().max(0.0) as usize).min(h);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let cov = rrect_coverage(x, y, rx, ry, rw, rh, r) * alpha;
+            if cov > 0.0 {
+                px[y * w + x] = blend(px[y * w + x], c, cov);
+            }
+        }
+    }
+}
+
+fn fill_circle(px: &mut [u32], w: usize, h: usize, cx: f32, cy: f32, r: f32, c: [f32; 3], alpha: f32) {
+    fill_rrect(px, w, h, (cx - r, cy - r, 2.0 * r, 2.0 * r), r, c, alpha);
+}
+
+/// Centre and diameter (pixels) of the orb of a frame.
+fn orb_geometry(f: &Frame, w: usize, h: usize, scale: f32) -> (f32, f32, f32) {
+    if f.look.tone == Tone::Neutral {
+        (w as f32 / 2.0, h as f32 / 2.0, w.min(h) as f32)
+    } else {
+        ((6.0 + ORB_FAULT_D / 2.0) * scale, h as f32 / 2.0, ORB_FAULT_D * scale)
+    }
+}
+
+/// Renders the background shape and the loudness glyph (not the text) into a
 /// premultiplied `0xAARRGGBB` buffer of `pixel_size(f, scale)`.
 pub fn render(f: &Frame, scale: f32) -> (usize, usize, Vec<u32>) {
     let (w, h) = pixel_size(f, scale);
     let (bg, _) = f.look.tone.colors();
-    let radius = 8.0 * scale;
+    let radius = match f.look.shape {
+        Shape::Rounded(r) => r * scale,
+        Shape::Pill => w.min(h) as f32 / 2.0,
+    };
     let mut px = vec![0u32; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let c = coverage(x, y, w, h, radius) * bg[3] as f32 / 255.0;
-            px[y * w + x] = pack(c * 255.0, bg[0] as f32 * c, bg[1] as f32 * c, bg[2] as f32 * c);
+    if !f.look.bodyless {
+        for y in 0..h {
+            for x in 0..w {
+                let c = rrect_coverage(x, y, 0.0, 0.0, w as f32, h as f32, radius) * bg[3] as f32 / 255.0;
+                px[y * w + x] = pack(c * 255.0, bg[0] as f32 * c, bg[1] as f32 * c, bg[2] as f32 * c);
+            }
         }
     }
-    if f.look.trace {
-        // Canvas inset 8 x 3 logical pixels, bars grow from the middle row.
-        let (padx, pady) = ((8.0 * scale).round() as usize, (3.0 * scale).round() as usize);
-        let (cw, ch) = (w.saturating_sub(2 * padx), h.saturating_sub(2 * pady));
-        for i in 0..TRACE_LEN {
-            let x0 = padx + i * cw / TRACE_LEN;
-            let x1 = padx + (i + 1) * cw / TRACE_LEN;
-            let x1 = if x1 - x0 > 1 { x1 - 1 } else { x1 };
-            let bh = (f.trace[i].clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
-            let top = (pady as f32 + (ch as f32 - bh) / 2.0).round() as usize;
-            let bot = ((pady as f32 + (ch as f32 + bh) / 2.0).round() as usize).min(h);
-            let a = 0.35 + 0.65 * (i as f32 / TRACE_LEN as f32);
-            for y in top..bot {
-                for x in x0..x1.min(w) {
-                    let p = px[y * w + x];
-                    let (pa, pr, pg, pb) =
-                        ((p >> 24) as f32, (p >> 16 & 255) as f32, (p >> 8 & 255) as f32, (p & 255) as f32);
-                    let k = 1.0 - a;
-                    px[y * w + x] = pack(pa * k + 255.0 * a, pr * k + 255.0 * a, pg * k + 255.0 * a, pb * k + 255.0 * a);
-                }
+    match f.look.glyph {
+        Glyph::None => {}
+        Glyph::Trace => render_trace(&mut px, w, h, f, scale),
+        Glyph::Bars => {
+            // Seven bars in a 52 x 16 canvas, the centre one reacting first and
+            // the edges echoing recent history.
+            let (cw, ch) = (52.0 * scale, 16.0 * scale);
+            let (ox, oy) = ((w as f32 - cw) / 2.0, (h as f32 - ch) / 2.0);
+            let n = 7usize;
+            let gap = cw / n as f32 * 0.38;
+            let bw = cw / n as f32 - gap;
+            for i in 0..n {
+                let d = (i as i32 - 3).unsigned_abs() as usize;
+                let v = f.trace[TRACE_LEN - 1 - d * 2] * (1.0 - d as f32 * 0.12);
+                let bh = (v.clamp(0.0, 1.0) * ch).max(bw);
+                let x = ox + i as f32 * (bw + gap) + gap / 2.0;
+                fill_rrect(&mut px, w, h, (x, oy + (ch - bh) / 2.0, bw, bh), bw / 2.0, [255.0; 3], 1.0);
+            }
+        }
+        Glyph::Orb => {
+            let (cx, cy, d) = orb_geometry(f, w, h, scale);
+            let r0 = d * 0.3;
+            if f.look.tone == Tone::Neutral {
+                // Halo grows with loudness; the inner disc stays steady.
+                let v = f.level.clamp(0.0, 1.0);
+                fill_circle(&mut px, w, h, cx, cy, r0 + v * (d / 2.0 - r0), [80.0, 140.0, 255.0], 0.25 + v * 0.35);
+                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [20.0, 20.0, 24.0], 0.9);
+            } else {
+                fill_circle(&mut px, w, h, cx, cy, r0 * 1.15, [0.0; 3], 0.18);
             }
         }
     }
     (w, h, px)
+}
+
+fn render_trace(px: &mut [u32], w: usize, h: usize, f: &Frame, scale: f32) {
+    // Canvas inset 8 x 3 logical pixels, bars grow from the middle row.
+    let (padx, pady) = ((8.0 * scale).round() as usize, (3.0 * scale).round() as usize);
+    let (cw, ch) = (w.saturating_sub(2 * padx), h.saturating_sub(2 * pady));
+    for i in 0..TRACE_LEN {
+        let x0 = padx + i * cw / TRACE_LEN;
+        let x1 = padx + (i + 1) * cw / TRACE_LEN;
+        let x1 = if x1 - x0 > 1 { x1 - 1 } else { x1 };
+        let bh = (f.trace[i].clamp(0.0, 1.0) * ch as f32).max(MIN_BAR * scale);
+        let top = (pady as f32 + (ch as f32 - bh) / 2.0).round() as usize;
+        let bot = ((pady as f32 + (ch as f32 + bh) / 2.0).round() as usize).min(h);
+        let a = 0.35 + 0.65 * (i as f32 / TRACE_LEN as f32);
+        for y in top..bot {
+            for x in x0..x1.min(w) {
+                px[y * w + x] = blend(px[y * w + x], [255.0; 3], a);
+            }
+        }
+    }
 }
 
 /// GDI text drawing may clear alpha. Keeps the RGB GDI drew and puts back the
@@ -389,16 +607,16 @@ pub fn text_lines(f: &Frame, scale: f32) -> Vec<TextLine> {
     }
     let (w, h) = pixel_size(f, scale);
     let (_, fg) = f.look.tone.colors();
-    let padx = (14.0 * scale).round() as i32;
+    let (left, right) = ((f.look.inset.0 * scale).round() as i32, (f.look.inset.1 * scale).round() as i32);
     let r = |top: f32, bottom: f32| Rect {
-        left: padx,
+        left,
         top: (top * scale).round() as i32,
-        right: w as i32 - padx,
+        right: w as i32 - right,
         bottom: ((bottom * scale).round() as i32).min(h as i32),
     };
     let mut out = vec![];
     if f.look.hint.is_empty() {
-        let lines = if f.look.title.chars().count() <= ONE_LINE_CHARS { 1.0 } else { 2.0 };
+        let lines = if f.look.one_line { 1.0 } else { 2.0 };
         let top = (f.look.h - lines * 17.0) / 2.0;
         out.push(TextLine {
             text: f.look.title.clone(),
@@ -408,8 +626,10 @@ pub fn text_lines(f: &Frame, scale: f32) -> Vec<TextLine> {
             color: fg,
         });
     } else {
-        out.push(TextLine { text: f.look.title.clone(), rect: r(10.0, 29.0), font_px: 14.0 * scale, bold: true, color: fg });
-        out.push(TextLine { text: f.look.hint.clone(), rect: r(31.0, 52.0), font_px: 12.0 * scale, bold: false, color: fg });
+        // Title (19) and hint (17) with a 2 px gap, centred vertically.
+        let top = (f.look.h - 38.0) / 2.0;
+        out.push(TextLine { text: f.look.title.clone(), rect: r(top, top + 19.0), font_px: 14.0 * scale, bold: true, color: fg });
+        out.push(TextLine { text: f.look.hint.clone(), rect: r(top + 21.0, top + 38.0), font_px: 12.0 * scale, bold: false, color: fg });
     }
     out
 }
@@ -542,26 +762,26 @@ mod tests {
 
     #[test]
     fn red_fault_shows_the_reason_and_its_hint() {
-        let l = look(&red(FaultReason::Blocked)).unwrap();
+        let l = look(&red(FaultReason::Blocked), Style::TraceStrip).unwrap();
         assert_eq!(l.title, "Windows is blocking the microphone");
         assert_eq!(l.hint, "Settings > Privacy > Microphone");
         assert_eq!((l.w, l.h), (RED_W, RED_H));
-        assert!(!l.trace);
+        assert_eq!(l.glyph, Glyph::None);
     }
 
     #[test]
     fn red_fault_without_a_hint_is_a_single_block() {
-        let l = look(&red(FaultReason::MicrophoneError)).unwrap();
+        let l = look(&red(FaultReason::MicrophoneError), Style::TraceStrip).unwrap();
         assert_eq!(l.h, RED_H_NO_HINT);
     }
 
     #[test]
     fn amber_typing_fault_is_amber_and_sized_to_its_message() {
-        let short = look(&amber("Couldn't type into this window")).unwrap();
+        let short = look(&amber("Couldn't type into this window"), Style::TraceStrip).unwrap();
         assert_eq!((short.tone, short.h), (Tone::Amber, AMBER_H_ONE_LINE));
-        let long = look(&amber("Speech model is too slow for this PC. Choose a smaller model in Settings.")).unwrap();
+        let long = look(&amber("Speech model is too slow for this PC. Choose a smaller model in Settings."), Style::TraceStrip).unwrap();
         assert_eq!((long.tone, long.h), (Tone::Amber, AMBER_H_TWO_LINES));
-        assert_eq!(look(&amber("Can't type into an administrator window")).unwrap().h, AMBER_H_TWO_LINES);
+        assert_eq!(look(&amber("Can't type into an administrator window"), Style::TraceStrip).unwrap().h, AMBER_H_TWO_LINES);
     }
 
     #[test]
@@ -575,17 +795,20 @@ mod tests {
             FaultReason::NoSound,
             FaultReason::MicrophoneError,
         ] {
-            assert_eq!(look(&red(r)).unwrap().tone, Tone::Red);
+            assert_eq!(look(&red(r), Style::TraceStrip).unwrap().tone, Tone::Red);
         }
     }
 
     #[test]
     fn normal_listening_is_the_small_dark_trace_strip_and_a_note_shows_text() {
-        let l = look(&listening(0.2)).unwrap();
-        assert_eq!((l.tone, l.trace, l.w, l.h), (Tone::Neutral, true, STRIP_W, STRIP_H));
-        let n = look(&Indicator::Listening { level: 0.2, note: Some("Microphone not found, using the system default") })
-            .unwrap();
-        assert!(!n.trace);
+        let l = look(&listening(0.2), Style::TraceStrip).unwrap();
+        assert_eq!((l.tone, l.glyph, l.w, l.h), (Tone::Neutral, Glyph::Trace, STRIP_W, STRIP_H));
+        let n = look(
+            &Indicator::Listening { level: 0.2, note: Some("Microphone not found, using the system default") },
+            Style::TraceStrip,
+        )
+        .unwrap();
+        assert_eq!(n.glyph, Glyph::None);
         assert_eq!(n.title, "Microphone not found, using the system default");
     }
 
@@ -698,5 +921,183 @@ mod tests {
         assert_eq!(drawn[1], 0xFF_FF_FF_FF);
         assert_eq!(drawn[2] >> 24, 0x80);
         assert_eq!(drawn[2] >> 16 & 255, 128);
+    }
+
+    // ---- ticket 14: Bar pill, Orb, positions ----
+
+    fn styled(ind: &Indicator, style: Style, settle_ms: u64) -> Frame {
+        let mut a = Animator::new();
+        a.set_styled(ind, style, 0);
+        a.tick(0);
+        let mut f = a.tick(33).unwrap();
+        let mut t = 33;
+        while t < settle_ms {
+            t += 33;
+            a.set_styled(ind, style, t);
+            f = a.tick(t).unwrap();
+        }
+        f
+    }
+
+    #[test]
+    fn settings_values_map_to_styles_and_positions() {
+        assert_eq!(Style::from_setting("bar-pill"), Some(Style::BarPill));
+        assert_eq!(Style::from_setting("orb"), Some(Style::Orb));
+        assert_eq!(Style::from_setting("trace-strip"), Some(Style::TraceStrip));
+        assert_eq!(Style::from_setting("nope"), None);
+        assert_eq!(
+            Placement::from_settings("top", "right"),
+            Some(Placement { vertical: Vertical::Top, horizontal: Horizontal::Right })
+        );
+        assert_eq!(Placement::from_settings("middle", "left"), None);
+    }
+
+    #[test]
+    fn each_style_has_its_own_listening_size() {
+        let size = |s| {
+            let l = look(&listening(0.2), s).unwrap();
+            (l.w, l.h)
+        };
+        assert_eq!(size(Style::TraceStrip), (150.0, 22.0));
+        assert_eq!(size(Style::BarPill), (76.0, 26.0));
+        assert_eq!(size(Style::Orb), (40.0, 40.0));
+    }
+
+    #[test]
+    fn pill_fault_is_a_wide_pill_with_reason_and_hint_and_fits_its_text() {
+        let l = look(&red(FaultReason::Blocked), Style::BarPill).unwrap();
+        assert_eq!((l.tone, l.shape, l.w, l.h), (Tone::Red, Shape::Pill, 300.0, 52.0));
+        assert!(l.one_line);
+        assert_eq!(look(&red(FaultReason::MicrophoneError), Style::BarPill).unwrap().h, 40.0);
+        let f = styled(&red(FaultReason::Blocked), Style::BarPill, 400);
+        for t in text_lines(&f, 1.0) {
+            assert!(t.rect.left >= 20 && t.rect.right <= 280 && t.rect.top >= 0 && t.rect.bottom <= 52);
+        }
+    }
+
+    #[test]
+    fn orb_fault_keeps_the_orb_on_the_left_and_text_to_its_right() {
+        let l = look(&red(FaultReason::NoMicrophone), Style::Orb).unwrap();
+        assert_eq!((l.glyph, l.w, l.h), (Glyph::Orb, 310.0, 56.0));
+        let f = styled(&red(FaultReason::NoMicrophone), Style::Orb, 400);
+        let lines = text_lines(&f, 1.0);
+        assert_eq!(lines.len(), 2);
+        for t in &lines {
+            assert!(t.rect.left >= 60 && t.rect.right <= 294 && t.rect.bottom <= 56);
+        }
+        // The darker disc of the orb sits at the left, plain red body elsewhere.
+        let (w, h, px) = render(&f, 1.0);
+        let disc = px[(h / 2) * w + 28];
+        assert!((disc >> 16 & 255) < 220, "disc not drawn: {disc:#x}");
+        assert_eq!(px[(h / 2) * w + 200] >> 16 & 255, 220);
+    }
+
+    #[test]
+    fn long_messages_get_two_lines_in_every_style() {
+        let long = "Speech model is too slow for this PC. Choose a smaller model in Settings.";
+        for s in [Style::TraceStrip, Style::BarPill, Style::Orb] {
+            let l = look(&amber(long), s).unwrap();
+            assert!(!l.one_line, "{s:?}");
+            assert_eq!(l.h, AMBER_H_TWO_LINES, "{s:?}");
+            let short = look(&amber("Couldn't type into this window"), s).unwrap();
+            assert!(short.one_line, "{s:?}");
+        }
+    }
+
+    #[test]
+    fn faults_grow_from_each_styles_own_listening_size() {
+        for s in [Style::BarPill, Style::Orb] {
+            let (w0, h0) = idle_size(s);
+            let mut a = Animator::new();
+            a.set_styled(&red(FaultReason::NoMicrophone), s, 0);
+            let f = a.tick(0).unwrap();
+            assert_eq!((f.w, f.h), (w0, h0), "{s:?}");
+            let end = a.tick(400).unwrap();
+            let target = look(&red(FaultReason::NoMicrophone), s).unwrap();
+            assert_eq!((end.w, end.h), (target.w, target.h), "{s:?}");
+        }
+    }
+
+    #[test]
+    fn style_change_applies_to_the_next_dictation_not_the_running_one() {
+        let mut a = Animator::new();
+        a.set_styled(&listening(0.2), Style::BarPill, 0);
+        a.tick(0);
+        a.set_styled(&listening(0.2), Style::Orb, 40);
+        assert_eq!(a.tick(40).unwrap().look.style, Style::BarPill);
+        a.set_styled(&Indicator::Hidden, Style::Orb, 100);
+        a.tick(100);
+        a.tick(300);
+        assert!(!a.active());
+        a.set_styled(&listening(0.2), Style::Orb, 400);
+        assert_eq!(a.tick(400).unwrap().look.style, Style::Orb);
+    }
+
+    #[test]
+    fn pill_bars_react_in_the_centre_and_stay_in_a_pill_body() {
+        let quiet = styled(&listening(0.0), Style::BarPill, 600);
+        let loud = styled(&listening(1.0), Style::BarPill, 600);
+        let (w, h, q) = render(&quiet, 1.0);
+        let (_, _, l) = render(&loud, 1.0);
+        assert_eq!((w, h), (76, 26));
+        let cx = w / 2;
+        let lit = |b: &[u32], x: usize| (0..h).filter(|&y| (b[y * w + x] >> 8 & 255) > 200).count();
+        assert!(lit(&l, cx) >= 14, "{}", lit(&l, cx));
+        assert!(lit(&q, cx) <= 6, "{}", lit(&q, cx));
+        assert_eq!(l[0] >> 24, 0, "corner of a pill is transparent");
+        assert_eq!(l[(h / 2) * w + 5] >> 24, 191);
+    }
+
+    #[test]
+    fn orb_halo_grows_with_loudness_and_has_no_body() {
+        let quiet = styled(&listening(0.0), Style::Orb, 800);
+        let loud = styled(&listening(1.0), Style::Orb, 800);
+        let (w, h, q) = render(&quiet, 1.0);
+        let (_, _, l) = render(&loud, 1.0);
+        assert_eq!((w, h), (40, 40));
+        assert_eq!(q[0] >> 24, 0);
+        let row = h / 2;
+        // x = 3 is outside the quiet orb (disc radius about 14) but inside a loud halo.
+        assert_eq!(q[row * w + 3] >> 24, 0);
+        assert!(l[row * w + 3] >> 24 > 40, "{:#x}", l[row * w + 3]);
+        assert!(q[row * w + w / 2] >> 24 > 200, "inner disc steady");
+    }
+
+    #[test]
+    fn dpi_scales_every_style() {
+        for (s, w, h) in [(Style::BarPill, 114, 39), (Style::Orb, 60, 60), (Style::TraceStrip, 225, 33)] {
+            let (rw, rh, px) = render(&styled(&listening(0.5), s, 400), 1.5);
+            assert_eq!((rw, rh), (w, h), "{s:?}");
+            assert_eq!(px.len(), w * h);
+        }
+        let f = styled(&red(FaultReason::NoMicrophone), Style::Orb, 400);
+        assert_eq!(pixel_size(&f, 2.0), (620, 112));
+    }
+
+    #[test]
+    fn all_six_positions_sit_inside_the_work_area_beside_the_taskbar() {
+        // Taskbar on the left (work area starts at x = 48) of a 1920x1080 monitor.
+        let work = Rect { left: 48, top: 0, right: 1920, bottom: 1080 };
+        let (w, h) = (300, 56);
+        let cases = [
+            (Vertical::Top, Horizontal::Left, (64, 16)),
+            (Vertical::Top, Horizontal::Center, (48 + (1872 - 300) / 2, 16)),
+            (Vertical::Top, Horizontal::Right, (1920 - 16 - 300, 16)),
+            (Vertical::Bottom, Horizontal::Left, (64, 1080 - 16 - 56)),
+            (Vertical::Bottom, Horizontal::Center, (48 + (1872 - 300) / 2, 1008)),
+            (Vertical::Bottom, Horizontal::Right, (1604, 1008)),
+        ];
+        for (vertical, horizontal, want) in cases {
+            assert_eq!(place(work, w, h, Placement { vertical, horizontal }, 1.0), want);
+        }
+    }
+
+    #[test]
+    fn margin_scales_with_dpi_in_every_corner() {
+        let work = Rect { left: 0, top: 0, right: 3000, bottom: 2000 };
+        let tl = Placement { vertical: Vertical::Top, horizontal: Horizontal::Left };
+        let br = Placement { vertical: Vertical::Bottom, horizontal: Horizontal::Right };
+        assert_eq!(place(work, 100, 60, tl, 1.5), (24, 24));
+        assert_eq!(place(work, 100, 60, br, 1.5), (3000 - 24 - 100, 2000 - 24 - 60));
     }
 }
