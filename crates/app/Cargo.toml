@@ -18,6 +18,7 @@ aloud-type-config = { path = "../config" }
 [target.'cfg(windows)'.dependencies]
 aloud-type-platform-windows = { path = "../platform-windows" }
 aloud-type-recognizer = { path = "../recognizer" }
+aloud-type-models = { path = "../models" }
 
 [dev-dependencies]
 aloud-type-recognizer = { path = "../recognizer" }

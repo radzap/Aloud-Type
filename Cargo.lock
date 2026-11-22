@@ -17,6 +17,7 @@ version = "0.1.0"
 dependencies = [
  "aloud-type-config",
  "aloud-type-core",
+ "aloud-type-models",
  "aloud-type-platform-windows",
  "aloud-type-recognizer",
 ]
