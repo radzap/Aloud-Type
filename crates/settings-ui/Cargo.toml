@@ -3,3 +3,12 @@ name = "aloud-type-settings-ui"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dependencies]
+aloud-type-config = { path = "../config" }
+aloud-type-core.workspace = true
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "thread-pool"] }
+
+[dev-dependencies]
+tempfile = "3"
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "thread-pool"] }

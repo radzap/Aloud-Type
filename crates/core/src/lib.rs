@@ -1,4 +1,6 @@
 //! OS-free core of Aloud Type: seams (traits) and test support.
+pub mod ipc;
+pub mod keynames;
 pub mod lifecycle;
 pub mod listening;
 pub mod power;

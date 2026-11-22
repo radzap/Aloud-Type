@@ -1,1 +1,10 @@
-//! Settings window. Filled in by later tickets.
+//! Settings window logic: Dictation key capture rules, the resident-process
+//! pipe protocol and the rebinding session. The GUI shell is a later step.
+pub mod capture;
+pub mod ipc;
+pub mod keys;
+pub mod rules;
+pub mod session;
+pub mod codes;
+mod window;
+pub use window::{run, HELP_LINE};
