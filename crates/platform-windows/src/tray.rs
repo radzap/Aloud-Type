@@ -27,6 +27,7 @@ const WM_CONTEXTMENU: isize = 0x007B;
 const WM_USER: u32 = 0x0400;
 const WM_TRAY: u32 = WM_USER + 1;
 const WM_APP_UPDATE: u32 = WM_USER + 2;
+const WM_APP_NOTICE: u32 = WM_USER + 3;
 const NIM_ADD: u32 = 0;
 const NIM_MODIFY: u32 = 1;
 const NIM_DELETE: u32 = 2;
@@ -196,6 +197,7 @@ struct Inner {
     hwnd: AtomicIsize,
     pending: Mutex<Option<TrayView>>,
     blocked: AtomicBool,
+    notice: Mutex<Option<String>>,
 }
 
 impl Default for TrayHandle {
@@ -211,6 +213,7 @@ impl TrayHandle {
                 hwnd: AtomicIsize::new(0),
                 pending: Mutex::new(None),
                 blocked: AtomicBool::new(false),
+                notice: Mutex::new(None),
             }),
         }
     }
@@ -228,6 +231,16 @@ impl TrayHandle {
         let h = self.inner.hwnd.load(Ordering::SeqCst);
         if h != 0 {
             unsafe { PostMessageW(h, WM_APP_UPDATE, 0, 0) };
+        }
+    }
+
+    /// Shows a brief notice (same look as the Startup notice), e.g. for an
+    /// invalid settings file. Thread-safe; ignored before the window exists.
+    pub fn notify(&self, text: &str) {
+        *self.inner.notice.lock().unwrap() = Some(text.to_string());
+        let h = self.inner.hwnd.load(Ordering::SeqCst);
+        if h != 0 {
+            unsafe { PostMessageW(h, WM_APP_NOTICE, 0, 0) };
         }
     }
 
@@ -364,6 +377,13 @@ unsafe extern "system" fn tray_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) ->
                         dispatch(hwnd, cmd, host);
                     }
                 });
+            }
+            0
+        }
+        WM_APP_NOTICE => {
+            let text = HOST.with(|h| h.borrow().as_ref().and_then(|h| h.handle.inner.notice.lock().unwrap().take()));
+            if let Some(t) = text {
+                show_notice(&t);
             }
             0
         }
