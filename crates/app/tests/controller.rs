@@ -257,3 +257,42 @@ fn a_brief_non_speech_verdict_inside_speech_does_not_cut_a_hole_in_the_audio() {
     }
     assert_eq!(*lens.borrow(), vec![1600, 3200, 4800]);
 }
+
+mod residency {
+    use super::*;
+    use aloud_type_app::residency::{Model, Residency, IDLE_UNLOAD_MS};
+    use aloud_type_config::ModelMemory;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn dictations_reload_an_unloaded_model_and_restart_the_idle_clock() {
+        let clock = Arc::new(AtomicU64::new(0));
+        let c2 = clock.clone();
+        let loader: aloud_type_app::residency::Loader = Arc::new(|_| Ok(Box::new(FakeRecognizer::new()) as Model));
+        let res = Residency::start(loader, Arc::new(move || c2.load(Ordering::SeqCst)), "base", ModelMemory::UnloadWhenIdle);
+        let mut r = rig(vec![]);
+        r.c.set_residency(res.clone());
+        let t = std::time::Instant::now();
+        while res.loaded_model().is_none() {
+            assert!(t.elapsed().as_secs() < 5);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        clock.store(IDLE_UNLOAD_MS, Ordering::SeqCst);
+        r.c.step(); // idle long enough: unloaded
+        assert!(res.loaded_model().is_none());
+        r.press(); // the Dictation key reloads in parallel with capture
+        while res.loaded_model().is_none() {
+            assert!(t.elapsed().as_secs() < 5);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        r.clock.advance(300);
+        r.release();
+        clock.store(IDLE_UNLOAD_MS * 2 - 1, Ordering::SeqCst);
+        r.c.step();
+        assert!(res.loaded_model().is_some(), "idle clock restarted at the end of the Dictation");
+        clock.store(IDLE_UNLOAD_MS * 3, Ordering::SeqCst);
+        r.c.step();
+        assert!(res.loaded_model().is_none());
+    }
+}

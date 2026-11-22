@@ -5,6 +5,7 @@ use aloud_type_core::listening::{Action, FaultReason, Indicator, KeyOutcome, Lis
 use aloud_type_core::power::{on_power, PowerAction, PowerEvent};
 use aloud_type_core::streaming::{StreamingConfig, StreamingInsertion, TextSink};
 use aloud_type_core::supervisor::WorkerFault;
+use crate::residency::Residency;
 use aloud_type_core::{Clock, Keyboard, Recognizer, VoiceGate};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -143,6 +144,7 @@ pub struct Controller<K: Keyboard, C: Clock + Clone> {
     config: ControllerConfig,
     session: Option<Session<C>>,
     latched: bool,
+    residency: Option<Residency>,
 }
 
 impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
@@ -162,7 +164,13 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             config: p.config,
             session: None,
             latched: false,
+            residency: None,
         }
+    }
+
+    /// Tell the model's residency about Dictation start/end and idle ticks.
+    pub fn set_residency(&mut self, r: Residency) {
+        self.residency = Some(r);
     }
 
     pub fn indicator(&self) -> Indicator {
@@ -192,6 +200,9 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
         }
         self.sync_latch();
         self.pump_audio();
+        if let Some(r) = &self.residency {
+            r.tick();
+        }
         self.monitor.tick();
         self.run_actions();
         // A fault that ended a hands-free Dictation left the engine latched;
@@ -260,8 +271,15 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
             return;
         }
         let settings = (self.settings)();
+        // The model reloads (if unloaded) in parallel with opening the microphone.
+        if let Some(r) = &self.residency {
+            r.dictation_started();
+        }
         match self.capture.start(&settings.microphone) {
             Err(reason) => {
+                if let Some(r) = &self.residency {
+                    r.dictation_ended();
+                }
                 self.monitor.start(false);
                 self.monitor.platform_fault(reason);
                 self.monitor.take_actions();
@@ -308,6 +326,7 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
         self.capture.stop();
         if self.session.take().is_some() {
             self.monitor.end();
+            self.dictation_over();
         }
     }
 
@@ -374,6 +393,20 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
     /// typing it. `from_monitor` is true when the monitor already knows the
     /// Dictation ended (a fault); otherwise it is told here.
     fn finish(&mut self, from_monitor: bool) {
+        let had_session = self.session.is_some();
+        self.finish_session(from_monitor);
+        if had_session {
+            self.dictation_over();
+        }
+    }
+
+    fn dictation_over(&self) {
+        if let Some(r) = &self.residency {
+            r.dictation_ended();
+        }
+    }
+
+    fn finish_session(&mut self, from_monitor: bool) {
         let Some(mut s) = self.session.take() else { return };
         // Whatever the stream still holds (it keeps its samples after a fault).
         let rest = self.capture.read();

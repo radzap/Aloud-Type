@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-human
+**Status:** resolved
 
 - [x] Three states exist at all tray sizes and read clearly on light and dark taskbars
 - [x] The licence terms of the generation tool allow commercial use (confirmed)
