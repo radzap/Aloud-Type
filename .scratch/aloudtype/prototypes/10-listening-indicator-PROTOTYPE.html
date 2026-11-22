@@ -1,0 +1,358 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Ticket 10: Listening indicator look and behaviour.
+  Four structurally different Listening indicator variants on a fake Windows desktop,
+  switchable via ?variant=A|B|C|D and the bottom bar (or the left/right arrow keys).
+  Open by double-clicking. Nothing here is production code; the real overlay is a
+  hand-drawn Win32 layered window (research 05).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Listening indicator prototype</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font: 14px "Segoe UI", system-ui, sans-serif; }
+  #desktop { position: fixed; inset: 0; transition: background .3s; }
+  #desktop.light { background: radial-gradient(circle at 30% 20%, #cfe3ff, #8fb3e6 60%, #6a8fc9); }
+  #desktop.dark  { background: radial-gradient(circle at 30% 20%, #2b3550, #141a2a 60%, #0b0e17); }
+  #desktop.busy  { background: repeating-linear-gradient(45deg,#e8e2d0 0 30px,#3a4a5e 30px 60px,#d97a4a 60px 90px,#ffffff 90px 120px); }
+
+  /* fake app window */
+  .win { position: absolute; left: 8%; top: 7%; width: 56%; height: 62%; background: #fff; border-radius: 8px;
+         box-shadow: 0 10px 40px rgba(0,0,0,.35); display: flex; flex-direction: column; overflow: hidden; }
+  #desktop.dark .win { background: #202020; color: #eee; }
+  .win .title { height: 32px; display: flex; align-items: center; padding: 0 12px; font-size: 12px; background: #f3f3f3; border-bottom: 1px solid #e3e3e3; }
+  #desktop.dark .win .title { background: #2b2b2b; border-color: #333; }
+  .win .title .dots { margin-left: auto; letter-spacing: 14px; opacity: .6; }
+  .win .body { padding: 16px 20px; font: 15px/1.6 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; overflow: auto; flex: 1; }
+  #caret { display: inline-block; width: 1.5px; height: 1.2em; background: currentColor; vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* taskbar */
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; background: rgba(32,32,32,.85); backdrop-filter: blur(20px);
+             display: flex; align-items: center; justify-content: center; gap: 10px; color: #fff; }
+  .taskbar .app { width: 34px; height: 34px; border-radius: 6px; background: rgba(255,255,255,.12); }
+  .taskbar .tray { position: absolute; right: 12px; display: flex; gap: 12px; align-items: center; font-size: 12px; }
+  .trayicon { width: 16px; height: 16px; border-radius: 4px; background: #7aa7ff; }
+  .trayicon.on { background: #4cd964; box-shadow: 0 0 0 2px rgba(76,217,100,.35); }
+  .trayicon.fault { background: #ff453a; }
+
+  /* ---------- Listening indicator (the thing under review) ---------- */
+  #ind { position: absolute; pointer-events: none; z-index: 10; transform-origin: center; }
+  #ind.hidden { opacity: 0; transform: scale(.85); transition: opacity .18s ease-in, transform .18s ease-in; }
+  #ind.shown  { opacity: 1; transform: scale(1);   transition: opacity .12s ease-out, transform .12s ease-out; }
+  .shell { display: flex; align-items: center; overflow: hidden; color: #fff; white-space: nowrap;
+           transition: width .22s cubic-bezier(.2,.9,.3,1.2), height .22s cubic-bezier(.2,.9,.3,1.2), background .15s, border-radius .22s, padding .22s; }
+  .reason { opacity: 0; transition: opacity .15s .1s; font-size: 13px; line-height: 1.25; }
+  .fault .reason { opacity: 1; }
+  .reason b { display: block; font-weight: 600; }
+  .reason small { opacity: .85; font-size: 11.5px; }
+  .micx { flex: none; width: 18px; height: 18px; }
+
+  /* ---------- prototype chrome (not part of the design) ---------- */
+  #panel { position: fixed; top: 12px; right: 12px; width: 290px; background: #fffbe6; color: #222; border: 2px dashed #c9a400;
+           border-radius: 10px; padding: 10px 12px; z-index: 100; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.25); }
+  #panel h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .08em; color: #8a6d00; }
+  #panel label { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; gap: 8px; }
+  #panel select, #panel button { font: inherit; }
+  #panel button { padding: 4px 8px; margin: 3px 3px 0 0; cursor: pointer; }
+  #panel .row { display: flex; flex-wrap: wrap; }
+  #state { margin-top: 8px; padding: 6px; background: #222; color: #9f9; font: 11px/1.45 Consolas, monospace; border-radius: 6px; white-space: pre; }
+  #switcher { position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%); z-index: 100; background: #111; color: #ffd60a;
+              border: 2px dashed #ffd60a; border-radius: 999px; padding: 6px 10px; display: flex; gap: 10px; align-items: center; font-weight: 600; font-size: 13px; }
+  #switcher button { background: none; border: 0; color: #ffd60a; font-size: 18px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="desktop" class="light">
+  <div class="win">
+    <div class="title">Untitled - Notepad <span class="dots">— ▢ ✕</span></div>
+    <div class="body" id="doc">Meeting notes, Tuesday
+
+</div>
+  </div>
+  <div class="taskbar">
+    <div class="app"></div><div class="app"></div><div class="app"></div><div class="app"></div>
+    <div class="tray"><span>ENG</span><div class="trayicon" id="tray"></div><span>14:32</span></div>
+  </div>
+  <div id="ind" class="hidden"></div>
+</div>
+
+<div id="panel">
+  <h3>PROTOTYPE CONTROLS (not the design)</h3>
+  <div class="row">
+    <button id="dictBtn">▶ Start Dictation (D)</button>
+  </div>
+  <label>Audio
+    <select id="audio">
+      <option value="speech">Simulated speech</option>
+      <option value="quiet">Quiet speaker</option>
+      <option value="silent">Silent room (auto fault after 5 s)</option>
+      <option value="mic">My real microphone</option>
+    </select></label>
+  <label>Force fault
+    <select id="fault">
+      <option value="">none</option>
+    </select></label>
+  <div class="row"><button id="unplug">Unplug mic mid-Dictation</button></div>
+  <label>Position
+    <select id="pos">
+      <option value="bottom">Bottom centre (above taskbar)</option>
+      <option value="top">Top centre</option>
+      <option value="tray">Bottom right (by tray)</option>
+      <option value="caret">Next to text caret</option>
+    </select></label>
+  <label>Size
+    <select id="size"><option value="0.8">Small</option><option value="1" selected>Medium</option><option value="1.3">Large</option></select></label>
+  <label>Wallpaper
+    <select id="wall"><option value="light">Light</option><option value="dark">Dark</option><option value="busy">Busy/high contrast</option></select></label>
+  <div id="state"></div>
+</div>
+
+<div id="switcher"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+
+<script>
+// ---------------- fault reasons (from research 04 §7; final text is ticket 09's call) ----------------
+const REASONS = {
+  nomic:    ["No microphone found", "Plug one in or pick one in Settings"],
+  missing:  ["Selected microphone not found", "Using it again when it's back"],
+  unplug:   ["Microphone disconnected", "Dictation stopped"],
+  busy:     ["Microphone in use by another app", "Close it and try again"],
+  privacy:  ["Windows is blocking the microphone", "Settings › Privacy › Microphone"],
+  service:  ["Windows audio service isn't running", ""],
+  stalled:  ["Microphone isn't sending audio", ""],
+  muted:    ["Microphone muted or blocked", "Check the mute switch"],
+  nosound:  ["No sound detected", "Is the right microphone selected?"],
+  unknown:  ["Can't use the microphone", "Error 0x88890004"],
+};
+const faultSel = document.getElementById('fault');
+for (const [k,[t]] of Object.entries(REASONS)) faultSel.add(new Option(t, k));
+
+// ---------------- shared state ----------------
+const S = { variant: 'A', on: false, fault: null, level: 0, dB: -90, hist: new Array(64).fill(0), silentFor: 0, w: 0, h: 0 };
+const ind = document.getElementById('ind');
+const $ = id => document.getElementById(id);
+
+// ---------------- audio sources ----------------
+let simT = 0, burst = 0, nextBurst = 0, wordQueue = 0;
+let analyser = null, buf = null;
+function simLevel(dt, gain) {
+  simT += dt;
+  if (simT > nextBurst) {                   // new syllable/word or a pause
+    const pause = Math.random() < .18;
+    burst = pause ? 0 : (.55 + Math.random() * .45) * gain;
+    nextBurst = simT + (pause ? .35 + Math.random() * .6 : .12 + Math.random() * .22);
+    if (pause) wordQueue++;
+  }
+  const noise = .03 + Math.random() * .02;
+  return Math.max(noise, burst * (.7 + .3 * Math.sin(simT * 38)) );
+}
+async function startMic() {
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const ctx = new AudioContext(); analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+    ctx.createMediaStreamSource(st).connect(analyser); buf = new Float32Array(analyser.fftSize);
+  } catch (e) { setFault('privacy'); }
+}
+function micLevel() {
+  if (!analyser) return 0;
+  analyser.getFloatTimeDomainData(buf);
+  let s = 0; for (const x of buf) s += x * x;
+  const db = 10 * Math.log10(s / buf.length + 1e-12);
+  return Math.min(1, Math.max(0, (db + 60) / 45));   // -60..-15 dBFS -> 0..1
+}
+
+// ---------------- variants: each builds its own DOM and draws its own meter ----------------
+const MIC_X = `<svg class="micx" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/><path d="M3 3l18 18"/></svg>`;
+const MIC = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`;
+
+const VARIANTS = {
+  A: { name: 'Bar pill', build(k) {
+      ind.innerHTML = `<div class="shell" id="sh"><canvas id="cv"></canvas><div class="reason" id="rs"></div></div>`;
+    },
+    layout(k, f) {
+      const sh = $('sh'), cv = $('cv');
+      sh.style.background = f ? 'rgba(220,38,38,.95)' : 'rgba(20,20,24,.82)';
+      sh.style.borderRadius = 999 + 'px'; sh.style.gap = 10*k + 'px';
+      sh.style.padding = f ? `0 ${16*k}px 0 ${14*k}px` : `0 ${12*k}px`;
+      sh.style.width = (f ? 300 : 76) * k + 'px'; sh.style.height = (f ? 48 : 26) * k + 'px';
+      cv.style.display = f ? 'none' : ''; sizeCanvas(cv, 52*k, 16*k);
+      $('rs').innerHTML = f ? MIC_X.replace('class="micx"', 'class="micx" style="display:inline;vertical-align:-4px;margin-right:8px"') + rhtml(f) : '';
+      return [(f?300:76)*k, (f?48:26)*k];
+    },
+    draw(c, w, h) {                                   // 7 bars, centre reacts first, edges echo recent history
+      const n = 7, gap = w / n * .38, bw = w / n - gap;
+      for (let i = 0; i < n; i++) {
+        const d = Math.abs(i - 3), v = S.hist[S.hist.length - 1 - d * 2] * (1 - d * .12);
+        const bh = Math.max(bw, v * h);
+        c.fillStyle = '#fff'; roundRect(c, i * (bw + gap) + gap/2, (h - bh) / 2, bw, bh, bw / 2);
+      }
+    } },
+
+  B: { name: 'Orb', build(k) {
+      ind.innerHTML = `<div class="shell" id="sh" style="gap:10px"><div id="orb" style="position:relative;flex:none"><canvas id="cv" style="position:absolute"></canvas><div id="mg" style="position:absolute"></div></div><div class="reason" id="rs"></div></div>`;
+    },
+    layout(k, f) {
+      const sh = $('sh'), orb = $('orb'), cv = $('cv'), mg = $('mg'), d = (f ? 44 : 40) * k;
+      orb.style.width = orb.style.height = d + 'px';
+      sizeCanvas(cv, d, d); cv.style.left = cv.style.top = 0;
+      const g = 16 * k; mg.style.width = mg.style.height = g + 'px'; mg.style.left = mg.style.top = (d - g) / 2 + 'px';
+      mg.innerHTML = f ? MIC_X.replace('micx', '') : MIC;
+      sh.style.background = f ? 'rgba(220,38,38,.95)' : 'transparent';
+      sh.style.borderRadius = (f ? 14 * k : d) + "px";
+      sh.style.padding = f ? `${6*k}px ${16*k}px ${6*k}px ${6*k}px` : '0';
+      sh.style.width = (f ? 310 * k : d) + 'px'; sh.style.height = (f ? 56 * k : d) + 'px';
+      $('rs').innerHTML = f ? rhtml(f) : '';
+      return [f ? 310*k : d, f ? 56*k : d];
+    },
+    draw(c, w, h, f) {
+      const r0 = w * .3, cx = w / 2, cy = h / 2;
+      if (!f) {                                          // halo grows with level, inner disc steady
+        const v = S.level;
+        c.fillStyle = `rgba(80,140,255,${.25 + v * .35})`; circle(c, cx, cy, r0 + v * (w / 2 - r0));
+      }
+      c.fillStyle = f ? 'rgba(0,0,0,.18)' : 'rgba(20,20,24,.9)'; circle(c, cx, cy, r0 * 1.15);
+    } },
+
+  C: { name: 'Trace strip', build(k) {
+      ind.innerHTML = `<div class="shell" id="sh" style="flex-direction:column;justify-content:center"><div class="reason" id="rs" style="text-align:center"></div><canvas id="cv"></canvas></div>`;
+    },
+    layout(k, f) {
+      const sh = $('sh'), cv = $('cv');
+      sh.style.background = f ? 'rgba(220,38,38,.95)' : 'rgba(20,20,24,.75)';
+      sh.style.borderRadius = 8 * k + 'px'; sh.style.padding = f ? `${8*k}px ${14*k}px` : `${3*k}px ${8*k}px`;
+      sh.style.width = (f ? 280 : 150) * k + 'px'; sh.style.height = (f ? 66 : 22) * k + 'px';
+      sizeCanvas(cv, (f ? 250 : 134) * k, (f ? 12 : 16) * k);
+      $('rs').innerHTML = f ? rhtml(f) : '';
+      return [(f?280:150)*k, (f?66:22)*k];
+    },
+    draw(c, w, h, f) {                                   // scrolling envelope, newest on the right
+      const n = S.hist.length; c.fillStyle = '#fff';
+      for (let i = 0; i < n; i++) {
+        const v = f ? 0 : S.hist[i], bh = Math.max(1.5, v * h), x = i / n * w;
+        c.globalAlpha = .35 + .65 * (i / n); c.fillRect(x, (h - bh) / 2, w / n - 1, bh);
+      }
+      c.globalAlpha = 1;
+    } },
+
+  D: { name: 'Caret buddy', build(k) {
+      ind.innerHTML = `<div class="shell" id="sh" style="gap:8px"><canvas id="cv"></canvas><div class="reason" id="rs"></div></div>`;
+    },
+    layout(k, f) {                                       // no chrome while listening; red bubble on fault
+      const sh = $('sh'), cv = $('cv');
+      sh.style.background = f ? 'rgba(220,38,38,.95)' : 'transparent';
+      sh.style.borderRadius = 6 * k + 'px'; sh.style.padding = f ? `${6*k}px ${12*k}px` : '0';
+      sh.style.boxShadow = f ? '0 4px 14px rgba(0,0,0,.3)' : 'none';
+      sh.style.width = (f ? 290 : 20) * k + 'px'; sh.style.height = (f ? 50 : 16) * k + 'px';
+      cv.style.display = f ? 'none' : ''; sizeCanvas(cv, 20 * k, 16 * k);
+      $('rs').innerHTML = f ? MIC_X.replace('class="micx"', 'class="micx" style="display:inline;vertical-align:-4px;margin-right:6px"') + rhtml(f) : '';
+      return [(f?290:20)*k, (f?50:16)*k];
+    },
+    draw(c, w, h) {
+      const n = 4, gap = 2, bw = (w - gap * (n - 1)) / n;
+      for (let i = 0; i < n; i++) {
+        const v = S.hist[S.hist.length - 1 - i * 3], bh = Math.max(2, v * h);
+        c.fillStyle = '#2f7bff'; c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 1;
+        c.strokeRect(i * (bw + gap), h - bh, bw, bh); c.fillRect(i * (bw + gap), h - bh, bw, bh);
+      }
+    } },
+};
+function rhtml(f) { const [t, s] = REASONS[f]; return `<span style="display:inline-block;vertical-align:middle"><b>${t}</b>${s ? `<small>${s}</small>` : ''}</span>`; }
+function sizeCanvas(cv, w, h) { const r = devicePixelRatio || 1; cv.width = w * r; cv.height = h * r; cv.style.width = w + 'px'; cv.style.height = h + 'px'; }
+function roundRect(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); c.fill(); }
+function circle(c, x, y, r) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
+
+// ---------------- position ----------------
+function place() {
+  const [w, h] = [S.w, S.h], vw = innerWidth, vh = innerHeight, pos = $('pos').value, m = 16;
+  let x, y;
+  if (pos === 'bottom') { x = (vw - w) / 2; y = vh - 48 - m - h; }
+  else if (pos === 'top') { x = (vw - w) / 2; y = m + 8; }
+  else if (pos === 'tray') { x = vw - w - m; y = vh - 48 - m - h; }
+  else { const r = $('caret').getBoundingClientRect(); x = r.right + 6; y = S.fault ? r.bottom + 6 : r.top + (r.height - h) / 2;
+         x = Math.min(x, vw - w - m); }
+  ind.style.left = x + 'px'; ind.style.top = y + 'px';
+}
+
+// ---------------- control flow ----------------
+function rebuild() {
+  const k = +$('size').value, V = VARIANTS[S.variant];
+  V.build(k); [S.w, S.h] = V.layout(k, S.fault); place();
+  $('vlabel').textContent = `${S.variant} (${V.name})`;
+}
+function relayout() { const k = +$('size').value; [S.w, S.h] = VARIANTS[S.variant].layout(k, S.fault); place(); }
+function setFault(f) { S.fault = f || null; faultSel.value = f || ''; relayout(); }
+function setDictation(on) {
+  S.on = on; S.silentFor = 0; ind.className = on ? 'shown' : 'hidden';
+  $('dictBtn').textContent = on ? '■ End Dictation (D)' : '▶ Start Dictation (D)';
+  if (!on) { setTimeout(() => { if (!S.on) setFault(null); }, 200); }
+  else if ($('audio').value === 'mic' && !analyser) startMic();
+}
+function setVariant(v) {
+  S.variant = v; const u = new URL(location); u.searchParams.set('variant', v); history.replaceState(null, '', u); rebuild();
+}
+
+$('dictBtn').onclick = () => setDictation(!S.on);
+faultSel.onchange = () => setFault(faultSel.value);
+$('unplug').onclick = () => { if (!S.on) setDictation(true); setFault('unplug'); };
+$('audio').onchange = () => { S.silentFor = 0; if ($('audio').value === 'mic' && S.on) startMic(); };
+$('pos').onchange = place; $('size').onchange = rebuild;
+$('wall').onchange = () => $('desktop').className = $('wall').value;
+const keys = Object.keys(VARIANTS);
+const step = d => setVariant(keys[(keys.indexOf(S.variant) + d + keys.length) % keys.length]);
+$('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+addEventListener('keydown', e => {
+  if (e.target.closest('select,input,textarea,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') step(-1);
+  if (e.key === 'ArrowRight') step(1);
+  if (e.key === 'd' || e.key === 'D') setDictation(!S.on);
+});
+addEventListener('resize', place);
+
+// fake Streaming insertion so the indicator is judged next to text appearing
+const WORDS = 'we agreed to ship the beta on friday and keep the settings window small so first run stays quick for everyone'.split(' ');
+let wi = 0;
+const doc = $('doc'); doc.innerHTML += '<span id="caret"></span>';
+function insertWord() { const c = $('caret'); c.before(document.createTextNode(WORDS[wi++ % WORDS.length] + ' ')); }
+
+// ---------------- frame loop (30 fps, like the real overlay) ----------------
+let last = performance.now(), acc = 0, sdk = 0;
+function frame(now) {
+  const dt = Math.min(.1, (now - last) / 1000); last = now; acc += dt;
+  if (acc >= 1 / 30) {
+    const src = $('audio').value; let raw = 0;
+    if (S.on && !S.fault) {
+      raw = src === 'speech' ? simLevel(acc, 1) : src === 'quiet' ? simLevel(acc, .35) : src === 'silent' ? .02 + Math.random() * .01 : micLevel();
+      if (raw < .08) { S.silentFor += acc; if (S.silentFor > 5) setFault('nosound'); } else S.silentFor = 0;
+      if ((src === 'speech' || src === 'quiet') && wordQueue > 0) { wordQueue--; insertWord(); insertWord(); }
+    }
+    // fast attack, slow release
+    S.level = raw > S.level ? S.level + (raw - S.level) * .6 : S.level + (raw - S.level) * .15;
+    S.hist.push(S.level); S.hist.shift();
+    S.dB = S.level > 0 ? (S.level * 45 - 60) : -90;
+    const cv = $('cv'); if (cv && cv.width) {
+      const c = cv.getContext('2d'), r = devicePixelRatio || 1;
+      c.setTransform(r, 0, 0, r, 0, 0); c.clearRect(0, 0, cv.width, cv.height);
+      VARIANTS[S.variant].draw(c, cv.width / r, cv.height / r, S.fault);
+    }
+    if ($('pos').value === 'caret') place();
+    $('tray').className = 'trayicon' + (S.fault && S.on ? ' fault' : S.on ? ' on' : '');
+    $('state').textContent =
+      `variant   ${S.variant} (${VARIANTS[S.variant].name})\n` +
+      `dictation ${S.on ? 'on' : 'off'}\n` +
+      `fault     ${S.fault ? REASONS[S.fault][0] : '-'}\n` +
+      `level     ${S.dB.toFixed(0)} dBFS (${S.level.toFixed(2)})\n` +
+      `silence   ${S.silentFor.toFixed(1)} s / 5 s\n` +
+      `overlay   ${Math.round(S.w)} x ${Math.round(S.h)} px @ ${$('pos').value}`;
+    acc = 0;
+  }
+  requestAnimationFrame(frame);
+}
+
+setVariant(new URLSearchParams(location.search).get('variant')?.toUpperCase() in VARIANTS
+  ? new URLSearchParams(location.search).get('variant').toUpperCase() : 'A');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
