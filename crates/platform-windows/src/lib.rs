@@ -1,1 +1,4 @@
-//! Windows platform adapters (keyboard hook, injection, audio, tray, overlay). Filled in by later tickets.
+//! Windows platform adapters (keyboard hook, injection, audio, tray, overlay).
+pub mod classify;
+#[cfg(windows)]
+pub mod hook;
