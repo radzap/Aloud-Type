@@ -1,6 +1,7 @@
 //! `WH_KEYBOARD_LL` hook on its own thread. The callback only classifies
 //! (see `classify`), swallows or passes, and posts to channels; injection of
 //! the chord replay runs on a separate worker so the callback never blocks.
+use crate::hook_health::HookHealth;
 use crate::classify::{should_reinstall, Classifier, Inject, RawKey, INJECT_TAG, VK_RCONTROL};
 use aloud_type_core::{KeyEvent, Keyboard};
 use std::cell::RefCell;
@@ -156,12 +157,14 @@ impl Default for HookConfig {
 }
 
 const SIMULATE_REMOVAL: u32 = WM_APP + 1;
+const REINSTALL_NOW: u32 = WM_APP + 2;
 
 /// Handle to the running hook thread; implements the core `Keyboard` seam.
 pub struct KeyboardHook {
     rx: Receiver<KeyEvent>,
     thread_id: u32,
     reinstalls: Arc<AtomicU32>,
+    health: Arc<HookHealth>,
 }
 
 impl KeyboardHook {
@@ -175,6 +178,8 @@ impl KeyboardHook {
         });
         let reinstalls = Arc::new(AtomicU32::new(0));
         let counter = reinstalls.clone();
+        let health = Arc::new(HookHealth::default());
+        let thread_health = health.clone();
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         std::thread::spawn(move || {
             STATE.with(|s| {
@@ -196,10 +201,20 @@ impl KeyboardHook {
                         let held = STATE.with(|s| s.borrow().as_ref().is_some_and(|st| st.classifier.held()));
                         if should_reinstall(now, last_install, cfg.watchdog_interval.as_millis() as u64, held) {
                             uninstall();
-                            if install() {
+                            let ok = install();
+                            thread_health.record_install(ok);
+                            if ok {
                                 counter.fetch_add(1, Ordering::Relaxed);
                             }
                             last_install = now;
+                        }
+                    }
+                    REINSTALL_NOW => {
+                        uninstall();
+                        let ok = install();
+                        thread_health.record_install(ok);
+                        if ok {
+                            counter.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                     SIMULATE_REMOVAL => uninstall(),
@@ -209,12 +224,23 @@ impl KeyboardHook {
             uninstall();
         });
         let thread_id = ready_rx.recv().map_err(|e| e.to_string())??;
-        Ok(Self { rx: ev_rx, thread_id, reinstalls })
+        Ok(Self { rx: ev_rx, thread_id, reinstalls, health })
     }
 
     /// Debug aid: remove the hook the way Windows would, silently.
     pub fn simulate_forced_removal(&self) {
         unsafe { PostThreadMessageW(self.thread_id, SIMULATE_REMOVAL, 0, 0) };
+    }
+
+    /// Re-installs the hook now (after resume from sleep).
+    pub fn reinstall_now(&self) {
+        unsafe { PostThreadMessageW(self.thread_id, REINSTALL_NOW, 0, 0) };
+    }
+
+    /// True while the last (re)install failed: the tray shows
+    /// "Dictation key unavailable".
+    pub fn key_unavailable(&self) -> bool {
+        self.health.key_unavailable()
     }
 
     /// Non-blocking poll usable through a shared reference.
