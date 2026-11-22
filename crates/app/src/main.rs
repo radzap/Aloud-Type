@@ -12,6 +12,11 @@ fn main() {
 
 #[cfg(windows)]
 fn main() {
+    // GPU probe mode of the one executable: runs in a child so a driver crash cannot hurt the app.
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == aloud_type_recognizer::gpu::PROBE_FLAG) {
+        std::process::exit(aloud_type_recognizer::gpu::probe_child_main(&args));
+    }
     host::run();
 }
 
@@ -143,6 +148,7 @@ mod host {
         // The Speech model loads on a worker thread; only verified files are loaded.
         let loader: Loader = {
             let (dir, legacy) = (models_dir.clone(), find_model(&paths, pins::BASE_MODEL_FILE));
+            let (settings_path, state_path) = (paths.settings_file(), paths.state_file());
             Arc::new(move |id: &str| {
                 let info = aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
                 let path = match aloud_type_models::verified_path(&dir, info) {
@@ -151,7 +157,21 @@ mod host {
                     Err(_) if legacy.is_some() && std::env::var_os("ALOUDTYPE_MODEL_DIR").is_some() => legacy.clone().unwrap(),
                     Err(e) => return Err(format!("{e:?}")),
                 };
-                let m = WhisperRecognizer::load(&path).map_err(|e| e.to_string())?;
+                use aloud_type_recognizer::gpu;
+                // The probe benchmarks the base q5_1 model (spec); fall back to the model being loaded.
+                let probe_model = aloud_type_models::find("base-q5_1")
+                    .and_then(|i| aloud_type_models::verified_path(&dir, i).ok())
+                    .unwrap_or_else(|| path.clone());
+                let runner = gpu::probe_runner(&probe_model).map_err(|e| e.to_string())?;
+                let gpu_setting = ConfigFile::<Settings>::open(settings_path.clone()).value().gpu.clone();
+                let m = gpu::open_for_host(
+                    Box::new(gpu::WhisperBackend::new(&path)),
+                    &gpu_setting,
+                    &state_path,
+                    &gpu::installed_adapters(),
+                    &runner,
+                    gpu::PROBE_TIMEOUT,
+                );
                 Ok(Box::new(m) as Model)
             })
         };

@@ -59,6 +59,7 @@ dependencies = [
  "aloud-type-core",
  "num_cpus",
  "sha2",
+ "tempfile",
  "whisper-rs",
 ]
 

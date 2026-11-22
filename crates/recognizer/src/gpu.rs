@@ -8,7 +8,7 @@ use aloud_type_core::Segment;
 use std::time::Duration;
 
 /// One decoder instance, on CPU or GPU.
-pub trait Engine {
+pub trait Engine: Send {
     fn try_recognize(
         &mut self,
         audio: &[f32],
@@ -281,7 +281,7 @@ use aloud_type_core::Recognizer;
 
 /// Loads engines. `load_library` is the only call that touches the optional GPU backend library,
 /// and the resident process makes it only for an approved device.
-pub trait GpuBackend {
+pub trait GpuBackend: Send {
     fn load_library(&self) -> Result<(), RecognizerError>;
     fn load_cpu(&self) -> Result<Box<dyn Engine>, RecognizerError>;
     fn load_gpu(&self, device: &GpuDevice) -> Result<Box<dyn Engine>, RecognizerError>;
@@ -292,7 +292,7 @@ pub struct GpuFallback {
     backend: Box<dyn GpuBackend>,
     gpu: Option<Box<dyn Engine>>,
     cpu: Option<Box<dyn Engine>>,
-    on_gpu_error: Box<dyn FnMut(&str)>,
+    on_gpu_error: Box<dyn FnMut(&str) + Send>,
 }
 
 /// Open the recognizer for `selection`. Anything but `Selection::Gpu` loads CPU only and never
@@ -301,7 +301,7 @@ pub struct GpuFallback {
 pub fn open_recognizer(
     backend: Box<dyn GpuBackend>,
     selection: &Selection,
-    on_gpu_error: Box<dyn FnMut(&str)>,
+    on_gpu_error: Box<dyn FnMut(&str) + Send>,
 ) -> GpuFallback {
     let mut r = GpuFallback { backend, gpu: None, cpu: None, on_gpu_error };
     match selection {
@@ -545,4 +545,48 @@ pub fn probe_runner(model: &Path) -> std::io::Result<StdChildRunner> {
     let mut r = StdChildRunner::current_exe()?;
     r.prefix = vec!["--model".into(), model.display().to_string()];
     Ok(r)
+}
+
+// ---- host entry point ----
+
+use aloud_type_config::ConfigFile;
+
+fn update_state(path: &Path, f: impl FnOnce(&mut State)) {
+    let mut file = ConfigFile::<State>::open(path);
+    if let Err(e) = file.update(f) {
+        eprintln!("gpu: cannot save state: {e}");
+    }
+}
+
+/// Settings "re-test" on the resident side: clear the error flag and saved results on disk.
+pub fn retest_on_disk(state_path: &Path) {
+    update_state(state_path, request_retest);
+}
+
+/// Open the recognizer for the resident process: select from settings and saved state, run the
+/// probe child for devices without a result for their current driver, save results, and load the
+/// GPU backend only for an approved device. A later backend error is saved to the state file.
+pub fn open_for_host(
+    backend: Box<dyn GpuBackend>,
+    setting: &Gpu,
+    state_path: &Path,
+    adapters: &[GpuDevice],
+    runner: &dyn ChildRunner,
+    probe_timeout: Duration,
+) -> GpuFallback {
+    let mut state = ConfigFile::<State>::open(state_path).value().clone();
+    let mut selection = select(setting, &state, adapters);
+    if let Selection::NeedsProbe(devices) = &selection {
+        let devices = devices.clone();
+        update_state(state_path, |st| {
+            for d in &devices {
+                let v = probe_in_child(runner, d, probe_timeout);
+                record_verdict(st, d, &v);
+            }
+        });
+        state = ConfigFile::<State>::open(state_path).value().clone();
+        selection = select(setting, &state, adapters);
+    }
+    let path = state_path.to_path_buf();
+    open_recognizer(backend, &selection, Box::new(move |_| update_state(&path, record_gpu_error)))
 }

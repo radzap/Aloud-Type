@@ -8,6 +8,8 @@ pub enum Command {
     SuspendKeys,
     ResumeKeys,
     ReloadSettings,
+    /// Settings asks the resident process to forget GPU results and probe again.
+    RetestGpu,
 }
 
 impl Command {
@@ -16,6 +18,7 @@ impl Command {
             Command::SuspendKeys => "suspend-keys",
             Command::ResumeKeys => "resume-keys",
             Command::ReloadSettings => "reload-settings",
+            Command::RetestGpu => "retest-gpu",
         }
     }
     pub fn decode(line: &str) -> Option<Self> {
@@ -23,6 +26,7 @@ impl Command {
             "suspend-keys" => Some(Command::SuspendKeys),
             "resume-keys" => Some(Command::ResumeKeys),
             "reload-settings" => Some(Command::ReloadSettings),
+            "retest-gpu" => Some(Command::RetestGpu),
             _ => None,
         }
     }
@@ -44,7 +48,7 @@ impl Connection {
                 match c {
                     Command::SuspendKeys => self.suspended = true,
                     Command::ResumeKeys => self.suspended = false,
-                    Command::ReloadSettings => {}
+                    Command::ReloadSettings | Command::RetestGpu => {}
                 }
                 (Some(c), "ok")
             }

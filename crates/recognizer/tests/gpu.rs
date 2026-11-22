@@ -4,9 +4,22 @@ use aloud_type_config::{Gpu, State};
 use aloud_type_core::{Recognizer, Segment, Word};
 use aloud_type_recognizer::gpu::*;
 use aloud_type_recognizer::RecognizerError;
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU32, Ordering::SeqCst};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Shared fake clock.
+#[derive(Clone, Default)]
+struct Clk(Arc<Mutex<Duration>>);
+impl Clk {
+    fn get(&self) -> Duration {
+        *self.0.lock().unwrap()
+    }
+    fn set(&self, d: Duration) {
+        *self.0.lock().unwrap() = d;
+    }
+}
 
 fn seg(words: &[&str]) -> Vec<Segment> {
     let ws: Vec<Word> = words
@@ -19,14 +32,14 @@ fn seg(words: &[&str]) -> Vec<Segment> {
 
 /// Fake engine: advances a shared fake clock by `cost` per decode, returns `words` or errors.
 struct FakeEngine {
-    clock: Rc<Cell<Duration>>,
+    clock: Clk,
     cost: Duration,
     words: Vec<&'static str>,
     fail_after: Option<usize>,
     calls: usize,
 }
 impl FakeEngine {
-    fn new(clock: &Rc<Cell<Duration>>, cost_ms: u64, words: &[&'static str]) -> Self {
+    fn new(clock: &Clk, cost_ms: u64, words: &[&'static str]) -> Self {
         FakeEngine { clock: clock.clone(), cost: Duration::from_millis(cost_ms), words: words.to_vec(), fail_after: None, calls: 0 }
     }
 }
@@ -51,7 +64,7 @@ const WORDS: &[&str] = &["ask", "not", "what", "your", "country"];
 
 #[test]
 fn probe_approves_a_gpu_that_is_fast_enough_and_matches_the_cpu_output() {
-    let clock = Rc::new(Cell::new(Duration::ZERO));
+    let clock = Clk::default();
     let mut cpu = FakeEngine::new(&clock, 1300, WORDS);
     let mut gpu = FakeEngine::new(&clock, 500, WORDS);
     let now = { let c = clock.clone(); move || c.get() };
@@ -62,7 +75,7 @@ fn probe_approves_a_gpu_that_is_fast_enough_and_matches_the_cpu_output() {
 
 #[test]
 fn probe_rejects_a_gpu_that_is_not_meaningfully_faster() {
-    let clock = Rc::new(Cell::new(Duration::ZERO));
+    let clock = Clk::default();
     let mut cpu = FakeEngine::new(&clock, 1000, WORDS);
     let mut gpu = FakeEngine::new(&clock, 800, WORDS); // 1.25x < 1.3x
     let now = { let c = clock.clone(); move || c.get() };
@@ -73,7 +86,7 @@ fn probe_rejects_a_gpu_that_is_not_meaningfully_faster() {
 
 #[test]
 fn probe_rejects_a_fast_gpu_whose_output_differs() {
-    let clock = Rc::new(Cell::new(Duration::ZERO));
+    let clock = Clk::default();
     let mut cpu = FakeEngine::new(&clock, 1000, WORDS);
     let mut gpu = FakeEngine::new(&clock, 100, &["and", "not", "what", "your", "country"]);
     let now = { let c = clock.clone(); move || c.get() };
@@ -84,7 +97,7 @@ fn probe_rejects_a_fast_gpu_whose_output_differs() {
 
 #[test]
 fn probe_treats_case_and_punctuation_differences_as_a_match() {
-    let clock = Rc::new(Cell::new(Duration::ZERO));
+    let clock = Clk::default();
     let mut cpu = FakeEngine::new(&clock, 1000, &["Ask,", "not"]);
     let mut gpu = FakeEngine::new(&clock, 100, &["ask", "not."]);
     let now = { let c = clock.clone(); move || c.get() };
@@ -93,7 +106,7 @@ fn probe_treats_case_and_punctuation_differences_as_a_match() {
 
 #[test]
 fn a_gpu_decode_error_during_the_probe_rejects_the_device() {
-    let clock = Rc::new(Cell::new(Duration::ZERO));
+    let clock = Clk::default();
     let mut cpu = FakeEngine::new(&clock, 1000, WORDS);
     let mut gpu = FakeEngine::new(&clock, 100, WORDS);
     gpu.fail_after = Some(0);
@@ -280,33 +293,33 @@ mod real_process {
 
 #[derive(Default)]
 struct Counters {
-    library_loads: Cell<u32>,
-    cpu_loads: Cell<u32>,
-    gpu_loads: Cell<u32>,
+    library_loads: AtomicU32,
+    cpu_loads: AtomicU32,
+    gpu_loads: AtomicU32,
 }
 struct FakeBackend {
-    c: Rc<Counters>,
-    clock: Rc<Cell<Duration>>,
+    c: Arc<Counters>,
+    clock: Clk,
     gpu_fail_after: Option<usize>,
     library_fails: bool,
 }
 impl FakeBackend {
-    fn new() -> (Self, Rc<Counters>) {
-        let c = Rc::new(Counters::default());
-        (FakeBackend { c: c.clone(), clock: Rc::new(Cell::new(Duration::ZERO)), gpu_fail_after: None, library_fails: false }, c)
+    fn new() -> (Self, Arc<Counters>) {
+        let c = Arc::new(Counters::default());
+        (FakeBackend { c: c.clone(), clock: Clk::default(), gpu_fail_after: None, library_fails: false }, c)
     }
 }
 impl GpuBackend for FakeBackend {
     fn load_library(&self) -> Result<(), RecognizerError> {
-        self.c.library_loads.set(self.c.library_loads.get() + 1);
+        self.c.library_loads.fetch_add(1, SeqCst);
         if self.library_fails { Err(RecognizerError("no vulkan-1.dll".into())) } else { Ok(()) }
     }
     fn load_cpu(&self) -> Result<Box<dyn Engine>, RecognizerError> {
-        self.c.cpu_loads.set(self.c.cpu_loads.get() + 1);
+        self.c.cpu_loads.fetch_add(1, SeqCst);
         Ok(Box::new(FakeEngine::new(&self.clock, 10, &["cpu", "words"])))
     }
     fn load_gpu(&self, _d: &GpuDevice) -> Result<Box<dyn Engine>, RecognizerError> {
-        self.c.gpu_loads.set(self.c.gpu_loads.get() + 1);
+        self.c.gpu_loads.fetch_add(1, SeqCst);
         let mut e = FakeEngine::new(&self.clock, 1, &["gpu", "words"]);
         e.fail_after = self.gpu_fail_after;
         Ok(Box::new(e))
@@ -330,8 +343,8 @@ fn with_the_gpu_unapproved_the_backend_library_is_never_loaded() {
         let mut r = open_recognizer(Box::new(b), &sel, Box::new(|_| {}));
         assert!(!r.using_gpu());
         assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
-        assert_eq!(c.library_loads.get(), 0, "{sel:?}");
-        assert_eq!(c.gpu_loads.get(), 0);
+        assert_eq!(c.library_loads.load(SeqCst), 0, "{sel:?}");
+        assert_eq!(c.gpu_loads.load(SeqCst), 0);
     }
 }
 
@@ -341,37 +354,37 @@ fn an_approved_device_loads_the_library_and_decodes_on_the_gpu() {
     let mut r = open_recognizer(Box::new(b), &Selection::Gpu(dev("RTX", "5")), Box::new(|_| {}));
     assert!(r.using_gpu());
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "gpu words");
-    assert_eq!((c.library_loads.get(), c.gpu_loads.get(), c.cpu_loads.get()), (1, 1, 0));
+    assert_eq!((c.library_loads.load(SeqCst), c.gpu_loads.load(SeqCst), c.cpu_loads.load(SeqCst)), (1, 1, 0));
 }
 
 #[test]
 fn a_gpu_error_mid_dictation_finishes_that_chunk_on_cpu_with_the_same_audio_and_disables_the_gpu() {
     let (mut b, c) = FakeBackend::new();
     b.gpu_fail_after = Some(1); // first decode fine, second fails
-    let errors = Rc::new(RefCell::new(Vec::<String>::new()));
+    let errors = Arc::new(Mutex::new(Vec::<String>::new()));
     let e2 = errors.clone();
-    let mut r = open_recognizer(Box::new(b), &Selection::Gpu(dev("RTX", "5")), Box::new(move |m| e2.borrow_mut().push(m.to_string())));
+    let mut r = open_recognizer(Box::new(b), &Selection::Gpu(dev("RTX", "5")), Box::new(move |m| e2.lock().unwrap().push(m.to_string())));
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "gpu words");
     // The failing decode still returns words (from CPU), nothing is lost.
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
     assert!(!r.using_gpu());
-    assert_eq!(errors.borrow().len(), 1);
-    assert!(errors.borrow()[0].contains("device lost"));
+    assert_eq!(errors.lock().unwrap().len(), 1);
+    assert!(errors.lock().unwrap()[0].contains("device lost"));
     // Later decodes stay on CPU and do not report again.
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
-    assert_eq!((errors.borrow().len(), c.cpu_loads.get(), c.gpu_loads.get()), (1, 1, 1));
+    assert_eq!((errors.lock().unwrap().len(), c.cpu_loads.load(SeqCst), c.gpu_loads.load(SeqCst)), (1, 1, 1));
 }
 
 #[test]
 fn a_backend_that_cannot_load_falls_back_to_cpu_and_reports_the_error() {
     let (mut b, _c) = FakeBackend::new();
     b.library_fails = true;
-    let errors = Rc::new(RefCell::new(Vec::<String>::new()));
+    let errors = Arc::new(Mutex::new(Vec::<String>::new()));
     let e2 = errors.clone();
-    let mut r = open_recognizer(Box::new(b), &Selection::Gpu(dev("RTX", "5")), Box::new(move |m| e2.borrow_mut().push(m.to_string())));
+    let mut r = open_recognizer(Box::new(b), &Selection::Gpu(dev("RTX", "5")), Box::new(move |m| e2.lock().unwrap().push(m.to_string())));
     assert!(!r.using_gpu());
     assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
-    assert_eq!(errors.borrow().len(), 1);
+    assert_eq!(errors.lock().unwrap().len(), 1);
 }
 
 // ---- probe child body and adapter discovery ----
@@ -384,7 +397,7 @@ fn the_probe_child_body_benchmarks_through_the_backend() {
     let now = move || clock.get();
     let v = probe_with_backend(&b, &dev("RTX", "5"), &[0.0; 16], "en", &now);
     assert!(!v.approved);
-    assert_eq!((c.library_loads.get(), c.gpu_loads.get(), c.cpu_loads.get()), (1, 1, 1));
+    assert_eq!((c.library_loads.load(SeqCst), c.gpu_loads.load(SeqCst), c.cpu_loads.load(SeqCst)), (1, 1, 1));
 }
 
 #[test]
@@ -440,4 +453,67 @@ fn the_embedded_probe_clip_decodes_to_about_eleven_seconds() {
 #[test]
 fn probe_child_main_with_bad_arguments_exits_nonzero_without_output() {
     assert_eq!(probe_child_main(&["--probe-gpu".to_string()]), 2);
+}
+
+// ---- host entry point ----
+
+struct CountingRunner(RefCell<u32>, Verdict);
+impl ChildRunner for CountingRunner {
+    fn run(&self, _a: &[String], _t: Duration) -> ChildOutcome {
+        *self.0.borrow_mut() += 1;
+        ChildOutcome::Exited { success: true, stdout: encode_verdict(&self.1) }
+    }
+}
+
+#[test]
+fn the_host_probes_once_saves_the_result_and_reuses_it_on_the_next_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    let adapters = [dev("RTX", "5")];
+    let runner = CountingRunner(RefCell::new(0), ok_verdict());
+
+    let (b, c) = FakeBackend::new();
+    let mut r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters, &runner, Duration::from_secs(5));
+    assert!(r.using_gpu());
+    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "gpu words");
+    assert_eq!(*runner.0.borrow(), 1);
+    assert_eq!(c.library_loads.load(SeqCst), 1);
+
+    // Next start: result is on disk, no second probe.
+    let (b, _c) = FakeBackend::new();
+    let r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters, &runner, Duration::from_secs(5));
+    assert!(r.using_gpu());
+    assert_eq!(*runner.0.borrow(), 1);
+}
+
+#[test]
+fn a_rejected_probe_keeps_the_host_on_cpu_and_never_loads_the_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    let runner = CountingRunner(RefCell::new(0), Verdict { approved: false, speedup: 0.9, reason: "slow".into() });
+    let (b, c) = FakeBackend::new();
+    let mut r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &[dev("UHD", "1")], &runner, Duration::from_secs(5));
+    assert!(!r.using_gpu());
+    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
+    assert_eq!(c.library_loads.load(SeqCst), 0);
+}
+
+#[test]
+fn a_mid_dictation_gpu_error_is_recorded_in_the_state_file_and_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let sp = dir.path().join("state.toml");
+    let adapters = [dev("RTX", "5")];
+    let runner = CountingRunner(RefCell::new(0), ok_verdict());
+    let (mut b, _c) = FakeBackend::new();
+    b.gpu_fail_after = Some(0);
+    let mut r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters, &runner, Duration::from_secs(5));
+    assert_eq!(text(&r.recognize(&[0.0], "en", None)), "cpu words");
+    assert!(aloud_type_config::ConfigFile::<State>::open(&sp).value().gpu_disabled_after_error);
+    let (b, c) = FakeBackend::new();
+    let r = open_for_host(Box::new(b), &Gpu::Auto, &sp, &adapters, &runner, Duration::from_secs(5));
+    assert!(!r.using_gpu());
+    assert_eq!(c.library_loads.load(SeqCst), 0);
+    // Re-test clears it on disk.
+    retest_on_disk(&sp);
+    assert!(!aloud_type_config::ConfigFile::<State>::open(&sp).value().gpu_disabled_after_error);
 }
