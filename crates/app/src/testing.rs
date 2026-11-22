@@ -1,5 +1,5 @@
 //! Fakes for the controller's platform seams.
-use crate::{Capture, Mic, StartGate, TypingFaults};
+use crate::{Capture, Mic, SetupGate, StartGate, TypingFaults};
 use aloud_type_core::listening::FaultReason;
 use aloud_type_core::streaming::TextSink;
 use std::cell::RefCell;
@@ -104,5 +104,32 @@ impl FakeStartGate {
 impl StartGate for FakeStartGate {
     fn check(&mut self) -> Option<String> {
         self.0.borrow().clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct FakeSetup(Rc<RefCell<(bool, u32)>>);
+
+impl Default for FakeSetup {
+    fn default() -> Self {
+        Self(Rc::new(RefCell::new((true, 0))))
+    }
+}
+
+impl FakeSetup {
+    pub fn set_complete(&self, c: bool) {
+        self.0.borrow_mut().0 = c;
+    }
+    pub fn opened(&self) -> u32 {
+        self.0.borrow().1
+    }
+}
+
+impl SetupGate for FakeSetup {
+    fn complete(&mut self) -> bool {
+        self.0.borrow().0
+    }
+    fn open_settings(&mut self) {
+        self.0.borrow_mut().1 += 1;
     }
 }

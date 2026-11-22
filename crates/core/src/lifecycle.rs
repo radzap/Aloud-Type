@@ -53,6 +53,11 @@ impl<K: Keyboard, C: Clock> DictationEngine<K, C> {
         Self { keyboard, clock, config, phase: Phase::Idle, down_at: 0 }
     }
 
+    /// Change the tap threshold or key kind live (used from the next press).
+    pub fn set_config(&mut self, config: LifecycleConfig) {
+        self.config = config;
+    }
+
     pub fn phase(&self) -> Phase {
         self.phase
     }

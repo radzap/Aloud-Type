@@ -4,5 +4,6 @@
 mod controller;
 pub mod residency;
 pub mod testing;
+pub mod wiring;
 
 pub use controller::*;
