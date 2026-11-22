@@ -9,6 +9,7 @@ aloud-type-config = { path = "../config" }
 aloud-type-core.workspace = true
 aloud-type-models = { path = "../models" }
 ureq = { version = "3", default-features = false, features = ["native-tls"] }
+aloud-type-platform-windows = { path = "../platform-windows" }
 iced = { version = "0.14", default-features = false, features = ["tiny-skia", "thread-pool"] }
 
 [dev-dependencies]
