@@ -68,6 +68,8 @@ pub struct StreamingInsertion<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock
     start: Option<Millis>,
     fed_samples: u64,
     fault: Option<TypingFault>,
+    /// The words of the last decode and the utterance length it covered.
+    last_decode: Option<(usize, Vec<String>)>,
 }
 
 impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V, T, C> {
@@ -89,6 +91,7 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
             start: None,
             fed_samples: 0,
             fault: None,
+            last_decode: None,
         }
     }
 
@@ -152,6 +155,7 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
         let words = self.decode();
         self.type_words(&words, words.len());
         self.audio.clear();
+        self.last_decode = None;
         self.previous.clear();
         self.typed_words = 0;
         self.heard_speech = false;
@@ -166,6 +170,7 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
         if elapsed.saturating_sub(audio_ms) > self.config.too_slow_ms {
             self.type_words(words, words.len());
             self.audio.clear();
+            self.last_decode = None;
             self.fault = Some(TypingFault::ModelTooSlow);
             return true;
         }
@@ -177,12 +182,22 @@ impl<R: Recognizer, V: VoiceGate, T: TextSink, C: Clock> StreamingInsertion<R, V
         if self.audio.is_empty() || self.fault.is_some() {
             return;
         }
-        let words = self.decode();
+        // Audio no decode has seen yet needs one; otherwise the last decode is final.
+        let words = match self.last_decode.take() {
+            Some((len, words)) if len == self.audio.len() => words,
+            _ => self.decode(),
+        };
         self.type_words(&words, words.len());
         self.audio.clear();
     }
 
     fn decode(&mut self) -> Vec<String> {
+        let words = self.decode_audio();
+        self.last_decode = Some((self.audio.len(), words.clone()));
+        words
+    }
+
+    fn decode_audio(&mut self) -> Vec<String> {
         self.recognizer
             .recognize(&self.audio, &self.language, None)
             .iter()
@@ -304,12 +319,33 @@ mod tests {
 
     #[test]
     fn ending_flushes_pending_words_without_trailing_space() {
-        let mut r = rig(vec!["hello world", "hello world", "hello world again"], 10);
+        let mut r = rig(vec!["hello world", "hello world again"], 10);
         r.ins.feed(&SPEECH);
         r.ins.feed(&SPEECH);
         assert_eq!(r.sink.typed(), "hello");
         r.ins.end();
         assert_eq!(r.sink.typed(), "hello world again");
+    }
+
+    #[test]
+    fn ending_right_after_a_decode_does_not_decode_the_same_audio_again() {
+        let mut r = rig(vec!["hello world", "hello world today", "this must not be asked for"], 10);
+        r.ins.feed(&SPEECH);
+        r.ins.feed(&SPEECH);
+        assert_eq!(r.lens.borrow().len(), 2);
+        r.ins.end();
+        assert_eq!(r.lens.borrow().len(), 2, "end() reuses the last decode of the unchanged audio");
+        assert_eq!(r.sink.typed(), "hello world today");
+    }
+
+    #[test]
+    fn ending_decodes_audio_that_no_decode_has_seen() {
+        let mut r = rig(vec!["hello world"], 1500); // slow: fallback mode, no streaming decodes
+        r.ins.feed(&SPEECH);
+        assert_eq!(r.lens.borrow().len(), 1);
+        r.ins.feed(&SPEECH);
+        r.ins.end();
+        assert_eq!(r.lens.borrow().len(), 1 + 1, "audio fed after the last decode is decoded at the end");
     }
 
     #[test]
@@ -361,7 +397,7 @@ mod tests {
     fn high_no_speech_probability_segments_are_dropped_but_others_kept() {
         let mut segs = seg_nsp("ghost words", 0.9);
         segs.extend(seg_nsp("real words", 0.1));
-        let mut r = rig_segs(vec![vec![], segs], 10);
+        let mut r = rig_segs(vec![segs], 10);
         r.ins.feed(&SPEECH);
         r.ins.end();
         assert_eq!(r.sink.typed(), "real words");
@@ -371,7 +407,7 @@ mod tests {
     fn utterance_over_the_cap_is_split_and_every_part_is_typed() {
         let clock = FakeClock::new();
         let sink = FakeSink::default();
-        let rec = FakeRecognizer::new().then(seg("first part")).then(seg("second part")).then(seg("second part"));
+        let rec = FakeRecognizer::new().then(seg("first part")).then(seg("second part"));
         let cfg = StreamingConfig { max_utterance_samples: 8, ..StreamingConfig::default() };
         let lens = Rc::new(RefCell::new(Vec::new()));
         let mut ins = StreamingInsertion::new(Timed(rec, clock.clone(), 10, lens.clone()), FakeVoiceGate(0.5), sink.clone(), clock, cfg, "en");
@@ -379,7 +415,7 @@ mod tests {
         assert_eq!(sink.typed(), "first part");
         ins.end();
         assert_eq!(sink.typed(), "first part second part");
-        assert_eq!(*lens.borrow(), vec![8, 4, 4]);
+        assert_eq!(*lens.borrow(), vec![8, 4]);
     }
 
     #[test]

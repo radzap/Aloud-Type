@@ -24,6 +24,10 @@ struct Rig {
 }
 
 fn rig(script: Vec<&str>) -> Rig {
+    rig_with(script, ControllerConfig { chunk_ms: CHUNK_MS, hangover_ms: 1000 })
+}
+
+fn rig_with(script: Vec<&str>, config: ControllerConfig) -> Rig {
     let kb = FakeKeyboard::new();
     let clock = FakeClock::new();
     let cap = FakeCapture::default();
@@ -44,7 +48,7 @@ fn rig(script: Vec<&str>) -> Rig {
         start_gate: Box::new(gate.clone()),
         typing_faults: Box::new(typed.clone()),
         settings: Box::new(DictationSettings::default),
-        config: ControllerConfig { chunk_ms: CHUNK_MS, hangover_ms: 1000 },
+        config,
     });
     Rig { c, kb, clock, cap, typed, gate }
 }
@@ -74,29 +78,42 @@ impl Rig {
 
 #[test]
 fn holding_types_confirmed_words_while_speaking_then_flushes_on_release() {
-    let mut r = rig(vec!["hello", "hello world", "hello world today", "hello world today again"]);
+    let mut r = rig(vec!["hello", "hello world", "hello world today"]);
     r.press();
     assert!(r.cap.is_open());
     r.clock.advance(300); // held well past the tap threshold
     r.speak(300);
     assert_eq!(r.typed.text(), "hello", "confirmed words appear while still held");
     r.release();
-    assert_eq!(r.typed.text(), "hello world today again", "release flushes the rest");
+    assert_eq!(r.typed.text(), "hello world today", "release flushes the rest");
     assert!(!r.cap.is_open());
     assert_eq!(r.c.indicator(), Indicator::Hidden);
     assert_eq!(r.c.tray(), Tray::Idle);
 }
 
 #[test]
+fn with_the_default_config_words_appear_within_two_seconds_of_speech_starting() {
+    // Each decode of the growing utterance extends the hypothesis by about a second of speech.
+    let mut r = rig_with(
+        vec!["one", "one two", "one two three", "one two three four", "one two three four five"],
+        ControllerConfig::default(),
+    );
+    r.press();
+    r.clock.advance(300);
+    r.speak(1900);
+    assert!(!r.typed.text().is_empty(), "nothing typed 1.9 s into speech: {:?}", r.typed.text());
+}
+
+#[test]
 fn tap_goes_hands_free_and_the_next_press_ends_and_flushes() {
-    let mut r = rig(vec!["one", "one two", "one two three"]);
+    let mut r = rig(vec!["one", "one two"]);
     r.press();
     r.clock.advance(100);
     r.release();
     assert!(r.cap.is_open(), "still listening after a tap");
     r.speak(200);
     r.press();
-    assert_eq!(r.typed.text(), "one two three");
+    assert_eq!(r.typed.text(), "one two");
     assert!(!r.cap.is_open());
     r.release(); // its release is ignored
     assert!(!r.cap.is_open());

@@ -71,7 +71,7 @@ pub struct ControllerConfig {
 
 impl Default for ControllerConfig {
     fn default() -> Self {
-        Self { chunk_ms: 1000, hangover_ms: 1000 }
+        Self { chunk_ms: 600, hangover_ms: 1000 }
     }
 }
 
