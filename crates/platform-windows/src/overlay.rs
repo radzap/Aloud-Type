@@ -3,7 +3,7 @@
 //! `GetMessage`; the only timer (about 30 fps) exists while the overlay is
 //! visible or fading, so an idle app does no overlay work. All decisions
 //! (smoothing, fades, growing, placement, pixels) live in `overlay_model`.
-use crate::overlay_model::{self as model, Animator, Placement, Rect, FRAME_MS};
+use crate::overlay_model::{self as model, Animator, Placement, Rect, Style, FRAME_MS};
 use aloud_type_core::listening::Indicator;
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -175,6 +175,7 @@ fn wide(s: &str) -> Vec<u16> {
 struct Shared {
     latest: Mutex<Indicator>,
     placement: Mutex<Placement>,
+    style: Mutex<Style>,
     /// A wake message is pending or the timer is running.
     awake: AtomicBool,
     /// The animation timer is running.
@@ -204,6 +205,12 @@ impl OverlayHandle {
 
     pub fn set_placement(&self, p: Placement) {
         *self.shared.placement.lock().unwrap() = p;
+    }
+
+    /// Chooses the indicator style. Applies from the next Dictation (the
+    /// overlay latches the style when it appears), no restart needed.
+    pub fn set_style(&self, s: Style) {
+        *self.shared.style.lock().unwrap() = s;
     }
 
     /// True while the overlay's frame timer is running.
@@ -349,7 +356,8 @@ unsafe fn frame(hwnd: Hwnd, starting: bool) {
             host.work = work;
             host.scale = scale;
         }
-        host.animator.set(&latest, now);
+        let style = *host.shared.style.lock().unwrap();
+        host.animator.set_styled(&latest, style, now);
         let placement = *host.shared.placement.lock().unwrap();
         match host.animator.tick(now) {
             Some(f) => {
@@ -412,6 +420,7 @@ pub fn spawn(placement: Placement) -> std::io::Result<OverlayHandle> {
     let shared = Arc::new(Shared {
         latest: Mutex::new(Indicator::Hidden),
         placement: Mutex::new(placement),
+        style: Mutex::new(Style::default()),
         awake: AtomicBool::new(false),
         ticking: AtomicBool::new(false),
         hwnd: AtomicIsize::new(0),
@@ -536,6 +545,24 @@ mod tests {
         o.set_indicator(Indicator::Listening { level: 0.1, note: None });
         wait(300);
         assert!(o.is_ticking());
+        // A style change waits for the next Dictation: switch to Bar pill, end, restart.
+        o.set_style(Style::BarPill);
+        wait(100);
+        unsafe { GetWindowRect(h, &mut r) };
+        assert_eq!((r.right - r.left, r.bottom - r.top), (150, 22));
+        o.set_indicator(Indicator::Hidden);
+        wait(600);
+        o.set_indicator(Indicator::Listening { level: 0.4, note: None });
+        wait(300);
+        unsafe { GetWindowRect(h, &mut r) };
+        assert_eq!((r.right - r.left, r.bottom - r.top), (76, 26));
+        o.set_style(Style::Orb);
+        o.set_indicator(Indicator::Hidden);
+        wait(600);
+        o.set_indicator(Indicator::Listening { level: 0.4, note: None });
+        wait(300);
+        unsafe { GetWindowRect(h, &mut r) };
+        assert_eq!((r.right - r.left, r.bottom - r.top), (40, 40));
         o.shutdown();
     }
 }
