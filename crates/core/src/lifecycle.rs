@@ -62,6 +62,11 @@ impl<K: Keyboard, C: Clock> DictationEngine<K, C> {
         self.phase != Phase::Idle
     }
 
+    /// Forget any Dictation in progress (the host ended it, e.g. after a hands-free fault).
+    pub fn reset(&mut self) {
+        self.phase = Phase::Idle;
+    }
+
     /// Process pending key events (timestamped now) and return the effects.
     pub fn poll(&mut self) -> Vec<Effect> {
         let now = self.clock.now();
@@ -218,6 +223,18 @@ mod tests {
         kb.press(KeyEvent::OtherKeyDown);
         assert!(e.poll().is_empty());
         assert_eq!(e.phase(), Phase::Latched);
+    }
+
+    #[test]
+    fn reset_returns_a_latched_engine_to_idle_so_the_next_press_starts() {
+        let (mut e, kb, _c) = engine(false);
+        kb.press(KeyEvent::DictationKeyDown);
+        kb.press(KeyEvent::DictationKeyUp);
+        e.poll();
+        assert_eq!(e.phase(), Phase::Latched);
+        e.reset();
+        kb.press(KeyEvent::DictationKeyDown);
+        assert_eq!(e.poll(), vec![StartDictation]);
     }
 
     #[test]
