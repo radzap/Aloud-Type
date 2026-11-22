@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 aloud-type-core.workspace = true
+cpal = "=0.18.2"
+winreg = "0.56.0"

@@ -1,9 +1,11 @@
 //! OS-free core of Aloud Type: seams (traits) and test support.
 pub mod lifecycle;
 pub mod listening;
+pub mod power;
 pub mod seams;
 pub mod speech_filter;
 pub mod streaming;
+pub mod supervisor;
 pub mod testing;
 pub use seams::*;
 
