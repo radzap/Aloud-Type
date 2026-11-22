@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 aloud-type-config = { path = "../config" }
 aloud-type-core.workspace = true
+aloud-type-platform-windows = { path = "../platform-windows" }
 iced = { version = "0.14", default-features = false, features = ["tiny-skia", "thread-pool"] }
 
 [dev-dependencies]

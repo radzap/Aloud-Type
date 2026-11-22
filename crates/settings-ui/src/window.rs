@@ -6,7 +6,9 @@ use crate::codes::{display_binding, vk_for_code_name};
 use crate::ipc::PipeClient;
 use crate::session::RebindSession;
 use aloud_type_config::{AppPaths, ConfigFile};
-use iced::widget::{button, column, row, text};
+use crate::items_view::{ItemsMsg, ItemsPanel};
+use crate::items_win::{WinLogin, WinMics};
+use iced::widget::{button, column, row, scrollable, text};
 use iced::{keyboard, Element, Subscription, Task};
 use std::time::{Duration, Instant};
 
@@ -17,10 +19,12 @@ enum Message {
     StartCapture,
     Key(keyboard::Event),
     CaptureTick,
+    Items(ItemsMsg),
 }
 
 struct App {
     session: RebindSession<PipeClient>,
+    items: ItemsPanel<WinLogin, WinMics>,
     started: Instant,
     info: Option<String>,
     warning: Option<String>,
@@ -32,7 +36,8 @@ impl App {
             .map(|p| p.settings_file())
             .unwrap_or_else(|| std::path::PathBuf::from("settings.toml"));
         let app = App {
-            session: RebindSession::new(ConfigFile::open(path), PipeClient::default()),
+            session: RebindSession::new(ConfigFile::open(&path), PipeClient::default()),
+            items: ItemsPanel::new(ConfigFile::open(&path), WinLogin::new(), WinMics::new()),
             started: Instant::now(),
             info: None,
             warning: None,
@@ -78,6 +83,7 @@ impl App {
                 };
                 self.apply(st);
             }
+            Message::Items(m) => self.items.update(m),
             Message::CaptureTick => {
                 let now = self.now();
                 let st = self.session.tick(now);
@@ -114,7 +120,8 @@ impl App {
         if let Some(e) = self.session.save_error() {
             col = col.push(text(format!("Could not save: {e}")).size(14));
         }
-        col.push(text(HELP_LINE).size(12)).into()
+        let col = col.push(text(HELP_LINE).size(12)).push(self.items.view().map(Message::Items));
+        scrollable(col).into()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -147,6 +154,6 @@ pub fn run() -> iced::Result {
     iced::application(App::boot, App::update, App::view)
         .title("Aloud Type Settings")
         .subscription(App::subscription)
-        .window_size((480.0, 300.0))
+        .window_size((480.0, 640.0))
         .run()
 }
