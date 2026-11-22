@@ -33,6 +33,10 @@ dependencies = [
 [[package]]
 name = "aloud-type-settings-ui"
 version = "0.1.0"
+dependencies = [
+ "aloud-type-config",
+ "tempfile",
+]
 
 [[package]]
 name = "alsa"
