@@ -9,6 +9,8 @@ pub trait Child {
     /// Raise the Settings window (a request while it is already open, e.g.
     /// the Dictation key pressed before setup is complete).
     fn bring_to_front(&mut self) {}
+    /// End the Settings process (the app is exiting).
+    fn close(&mut self) {}
 }
 
 pub trait Spawner {
@@ -41,12 +43,25 @@ impl<S: Spawner> SettingsLauncher<S> {
         self.child = Some(self.spawner.spawn()?);
         Ok(true)
     }
+
+    /// Closes the Settings window if it is open, so Exit leaves nothing behind.
+    pub fn close(&mut self) {
+        if let Some(mut c) = self.child.take() {
+            if c.is_running() {
+                c.close();
+            }
+        }
+    }
 }
 
-/// Spawns `<this exe> --settings`.
-pub struct ExeSpawner;
+/// Spawns the Settings executable directly, so the child is the process that
+/// owns the window (raising and closing it need that process).
+pub struct ExeSpawner(pub std::path::PathBuf);
 
 pub struct ProcessChild(std::process::Child);
+
+/// How long Settings gets to close its window before it is ended.
+const CLOSE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl Child for ProcessChild {
     fn is_running(&mut self) -> bool {
@@ -55,7 +70,41 @@ impl Child for ProcessChild {
     fn bring_to_front(&mut self) {
         raise_windows_of_process(self.0.id());
     }
+    fn close(&mut self) {
+        // Settings saves every change as it is made, so a plain close loses nothing.
+        close_windows_of_process(self.0.id());
+        let deadline = std::time::Instant::now() + CLOSE_GRACE;
+        while self.is_running() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if self.is_running() {
+            let _ = self.0.kill();
+        }
+        let _ = self.0.wait();
+    }
 }
+
+#[cfg(windows)]
+fn close_windows_of_process(pid: u32) {
+    use crate::win32::*;
+    const WM_CLOSE: u32 = 0x0010;
+    extern "system" fn each(h: Hwnd, param: isize) -> i32 {
+        unsafe {
+            let mut p = 0u32;
+            GetWindowThreadProcessId(h, &mut p);
+            if p == param as u32 && IsWindowVisible(h) != 0 {
+                PostMessageW(h, WM_CLOSE, 0, 0);
+            }
+        }
+        1
+    }
+    unsafe {
+        EnumWindows(each, pid as isize);
+    }
+}
+
+#[cfg(not(windows))]
+fn close_windows_of_process(_pid: u32) {}
 
 #[cfg(windows)]
 fn raise_windows_of_process(pid: u32) {
@@ -86,8 +135,7 @@ fn raise_windows_of_process(_pid: u32) {}
 impl Spawner for ExeSpawner {
     type Child = ProcessChild;
     fn spawn(&mut self) -> io::Result<ProcessChild> {
-        std::process::Command::new(std::env::current_exe()?)
-            .arg("--settings")
+        std::process::Command::new(&self.0)
             .spawn()
             .map(ProcessChild)
     }
@@ -100,6 +148,7 @@ mod tests {
     use std::rc::Rc;
 
     thread_local!(static RAISED: Cell<u32> = const { Cell::new(0) });
+    thread_local!(static CLOSED: Cell<u32> = const { Cell::new(0) });
     struct FakeChild(Rc<Cell<bool>>);
     impl Child for FakeChild {
         fn is_running(&mut self) -> bool {
@@ -107,6 +156,10 @@ mod tests {
         }
         fn bring_to_front(&mut self) {
             RAISED.with(|r| r.set(r.get() + 1));
+        }
+        fn close(&mut self) {
+            CLOSED.with(|c| c.set(c.get() + 1));
+            self.0.set(false);
         }
     }
     struct FakeSpawner {
@@ -168,6 +221,27 @@ mod tests {
         running.set(false);
         assert!(l.open().unwrap());
         assert_eq!(n.get(), 2);
+    }
+
+    #[test]
+    fn close_ends_an_open_settings_window() {
+        let (mut l, running, _n) = launcher(false);
+        CLOSED.with(|c| c.set(0));
+        l.open().unwrap();
+        l.close();
+        assert_eq!(CLOSED.with(|c| c.get()), 1);
+        assert!(!running.get());
+    }
+
+    #[test]
+    fn close_does_nothing_when_settings_is_not_open() {
+        let (mut l, running, _n) = launcher(false);
+        CLOSED.with(|c| c.set(0));
+        l.close();
+        l.open().unwrap();
+        running.set(false); // the user closed it
+        l.close();
+        assert_eq!(CLOSED.with(|c| c.get()), 0);
     }
 
     #[test]

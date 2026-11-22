@@ -14,7 +14,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use crate::win32::{
-    DispatchMessageW, GetMessageW, Hwnd, Msg, Point, SetForegroundWindow, ShowWindow,
+    DispatchMessageW, GetMessageW, Hwnd, Msg, Point, PostMessageW, SetForegroundWindow, ShowWindow,
     TranslateMessage,
 };
 
@@ -130,7 +130,6 @@ extern "system" {
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
-    fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
     fn RegisterWindowMessageW(name: *const u16) -> u32;
     fn DestroyIcon(i: isize) -> i32;

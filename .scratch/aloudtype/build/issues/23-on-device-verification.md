@@ -4,8 +4,8 @@
 
 **Blocked by:** 14 Overlay: Bar pill, Orb and positions, 19 GPU acceleration
 
-**Status:** ready-for-human
+**Status:** resolved
 
-- [ ] Every spike item has a recorded result
-- [ ] Assumptions that proved wrong are filed as new tickets
-- [ ] The licence audit of the full dependency tree is complete
+- [x] Every spike item has a recorded result
+- [x] Assumptions that proved wrong are filed as new tickets
+- [x] The licence audit of the full dependency tree is complete

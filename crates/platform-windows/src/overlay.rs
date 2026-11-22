@@ -12,7 +12,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::Instant;
 
 use crate::win32::{
-    DispatchMessageW, GetForegroundWindow, GetMessageW, Hwnd, Msg, Point, ShowWindow,
+    DispatchMessageW, GetForegroundWindow, GetMessageW, Hwnd, Msg, Point, PostMessageW, ShowWindow,
     TranslateMessage,
 };
 
@@ -120,7 +120,6 @@ extern "system" {
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
-    fn PostMessageW(h: Hwnd, m: u32, w: usize, l: isize) -> i32;
     fn PostQuitMessage(code: i32);
     fn SetTimer(h: Hwnd, id: usize, ms: u32, f: usize) -> usize;
     fn KillTimer(h: Hwnd, id: usize) -> i32;

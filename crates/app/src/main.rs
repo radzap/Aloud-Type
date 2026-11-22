@@ -348,13 +348,17 @@ mod host {
         {
             let tray = tray_handle.clone();
             std::thread::spawn(move || {
-                let mut launcher = SettingsLauncher::new(ExeSpawner);
+                let settings_exe = std::env::current_exe()
+                    .map(|e| settings_exe_beside(&e))
+                    .unwrap_or_else(|_| PathBuf::from("aloud-type-settings-ui.exe"));
+                let mut launcher = SettingsLauncher::new(ExeSpawner(settings_exe));
                 for c in cmd_rx {
                     match c {
                         TrayCommand::OpenSettings => {
                             let _ = launcher.open();
                         }
                         TrayCommand::Exit => {
+                            launcher.close();
                             tray.quit();
                             return;
                         }

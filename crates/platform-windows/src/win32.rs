@@ -33,4 +33,5 @@ extern "system" {
     pub fn IsIconic(hwnd: Hwnd) -> i32;
     pub fn EnumWindows(callback: extern "system" fn(Hwnd, isize) -> i32, param: isize) -> i32;
     pub fn AllowSetForegroundWindow(pid: u32) -> i32;
+    pub fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> i32;
 }
