@@ -7,6 +7,8 @@ pub mod inject;
 #[cfg(windows)]
 pub mod inject_win;
 #[cfg(windows)]
+pub mod file_watch;
+#[cfg(windows)]
 pub mod hook;
 #[cfg(windows)]
 pub mod instance;
@@ -14,6 +16,8 @@ pub mod instance;
 pub mod pipe_server;
 #[cfg(windows)]
 pub mod power_win;
+#[cfg(windows)]
+pub mod thread_priority;
 #[cfg(windows)]
 pub mod tray;
 #[cfg(windows)]

@@ -205,3 +205,45 @@ fn the_settings_window_is_the_sibling_executable() {
     let p = settings_exe_beside(std::path::Path::new("C:/Apps/AloudType/aloud-type.exe"));
     assert_eq!(p, std::path::PathBuf::from("C:/Apps/AloudType/aloud-type-settings-ui.exe"));
 }
+
+#[derive(Default)]
+struct CountingSpawner(u32);
+impl BackgroundSpawner for CountingSpawner {
+    fn spawn_background_models(&mut self) {
+        self.0 += 1;
+    }
+}
+
+fn dir_with_base_installed() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let m = aloud_type_models::find(aloud_type_models::FIRST_RUN_MODEL).unwrap();
+    std::fs::File::create(aloud_type_models::model_path(d.path(), m)).unwrap().set_len(m.size).unwrap();
+    d
+}
+
+#[test]
+fn background_downloads_start_once_when_something_is_due_and_again_only_after_rearming() {
+    let d = dir_with_base_installed();
+    let (s, st) = (Settings::default(), State::default());
+    let (mut bg, mut sp) = (BackgroundModels::default(), CountingSpawner::default());
+    bg.check(&s, &st, d.path(), &mut sp);
+    bg.check(&s, &st, d.path(), &mut sp);
+    assert_eq!(sp.0, 1, "voice model missing: one spawn, not one per check");
+    bg.rearm();
+    bg.check(&s, &st, d.path(), &mut sp);
+    assert_eq!(sp.0, 2);
+}
+
+#[test]
+fn nothing_is_spawned_before_first_run_or_when_nothing_is_due() {
+    let empty = tempfile::tempdir().unwrap();
+    let (s, st) = (Settings::default(), State::default());
+    let (mut bg, mut sp) = (BackgroundModels::default(), CountingSpawner::default());
+    bg.check(&s, &st, empty.path(), &mut sp);
+    assert_eq!(sp.0, 0, "setup is incomplete");
+    let d = dir_with_base_installed();
+    let vad = &aloud_type_models::VAD_MODEL;
+    std::fs::File::create(aloud_type_models::model_path(d.path(), vad)).unwrap().set_len(vad.size).unwrap();
+    bg.check(&s, &st, d.path(), &mut sp);
+    assert_eq!(sp.0, 0, "voice model present and no confirmed GPU");
+}

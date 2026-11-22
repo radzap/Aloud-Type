@@ -178,3 +178,41 @@ pub fn handle_report<K: aloud_type_core::Keyboard, C: aloud_type_core::Clock + C
 pub fn settings_exe_beside(current_exe: &std::path::Path) -> std::path::PathBuf {
     current_exe.with_file_name("aloud-type-settings-ui.exe")
 }
+
+/// Starts the Settings program's background downloads (the resident process
+/// has no network code of its own).
+pub trait BackgroundSpawner {
+    fn spawn_background_models(&mut self);
+}
+
+/// Decides when the voice model or the GPU default model is due, once each
+/// time it is armed (after a model load, or after settings or a GPU re-test change).
+#[derive(Default)]
+pub struct BackgroundModels {
+    spawned_for_current_files: bool,
+}
+
+impl BackgroundModels {
+    /// Spawns the downloader when something is due and it was not already
+    /// started for the files as they are now.
+    pub fn check(
+        &mut self,
+        settings: &Settings,
+        state: &aloud_type_config::State,
+        models_dir: &std::path::Path,
+        spawner: &mut dyn BackgroundSpawner,
+    ) {
+        if self.spawned_for_current_files {
+            return;
+        }
+        if aloud_type_models::background_work(settings, state, models_dir).any() {
+            self.spawned_for_current_files = true;
+            spawner.spawn_background_models();
+        }
+    }
+
+    /// Settings or the GPU verdict may have changed what is due.
+    pub fn rearm(&mut self) {
+        self.spawned_for_current_files = false;
+    }
+}

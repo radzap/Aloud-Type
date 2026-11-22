@@ -41,11 +41,12 @@ fn run_settings_window() -> i32 {
 #[cfg(windows)]
 mod host {
     use aloud_type_app::residency::{Loader, Model, Residency};
+    use aloud_type_app::wake::Wake;
     use aloud_type_app::wiring::*;
     use aloud_type_app::*;
     use aloud_type_config::{
         verbose_requested, AppPaths, ConfigFile, Event, HorizontalPosition, IndicatorStyle, Logger, ModelMemory,
-        Settings, SettingsNotice, StdFs, VerticalPosition,
+        Settings, SettingsNotice, State, StdFs, VerticalPosition,
     };
     use aloud_type_core::ipc::{Command as PipeCommand, PIPE_NAME};
     use aloud_type_core::lifecycle::LifecycleConfig;
@@ -57,6 +58,7 @@ mod host {
     use aloud_type_platform_windows::audio::device::MicChoice;
     use aloud_type_platform_windows::audio::privacy::WinRegistry;
     use aloud_type_platform_windows::audio::session::AudioCapture;
+    use aloud_type_platform_windows::file_watch::watch_file;
     use aloud_type_platform_windows::hook::{HookConfig, KeyboardHook};
     use aloud_type_platform_windows::inject::{check_can_start, FaultSlot, InjectingSink};
     use aloud_type_platform_windows::inject_win::{ForegroundElevation, SendInputBackend};
@@ -65,13 +67,15 @@ mod host {
     use aloud_type_platform_windows::overlay_model::{Placement, Style};
     use aloud_type_platform_windows::pipe_server::PipeServer;
     use aloud_type_platform_windows::power_win::PowerWatcher;
+    use aloud_type_platform_windows::thread_priority;
     use aloud_type_platform_windows::settings_launcher::{ExeSpawner, SettingsLauncher};
     use aloud_type_platform_windows::tray::{self, TrayHandle};
     use aloud_type_platform_windows::tray_model::{self, startup_action, Command as TrayCommand};
-    use aloud_type_recognizer::{pins, SileroVoiceGate};
+    use aloud_type_recognizer::SileroVoiceGate;
     use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
     use std::rc::Rc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
@@ -160,26 +164,28 @@ mod host {
         }
     }
 
-    fn model_dirs(paths: &AppPaths) -> Vec<PathBuf> {
-        let mut dirs = Vec::new();
-        if let Some(d) = std::env::var_os("ALOUDTYPE_MODEL_DIR") {
-            dirs.push(PathBuf::from(d));
-        }
-        dirs.push(paths.models_dir());
-        if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-            dirs.push(PathBuf::from(l).join("AloudTypeDev").join("models"));
-        }
-        dirs
-    }
-
-    fn find_model(paths: &AppPaths, name: &str) -> Option<PathBuf> {
-        model_dirs(paths).into_iter().map(|d| d.join(name)).find(|p| p.exists())
-    }
-
     fn setup_complete(paths: &AppPaths) -> bool {
-        let dir = std::env::var_os("ALOUDTYPE_MODEL_DIR").map(PathBuf::from).unwrap_or_else(|| paths.models_dir());
-        aloud_type_models::setup_complete(&dir)
-            || (std::env::var_os("ALOUDTYPE_MODEL_DIR").is_some() && find_model(paths, pins::BASE_MODEL_FILE).is_some())
+        aloud_type_models::setup_complete(&paths.models_dir())
+    }
+
+    /// Starts the Settings program's windowless downloader (one at a time).
+    #[derive(Default)]
+    struct ExeBackground(Option<std::process::Child>);
+    impl BackgroundSpawner for ExeBackground {
+        fn spawn_background_models(&mut self) {
+            use std::os::windows::process::CommandExt;
+            if self.0.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None))) {
+                return;
+            }
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            self.0 = std::env::current_exe().ok().and_then(|exe| {
+                std::process::Command::new(settings_exe_beside(&exe))
+                    .arg("--background-models")
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .ok()
+            });
+        }
     }
 
     /// Overlay and tray as the places controller state is shown.
@@ -321,6 +327,9 @@ mod host {
     /// The controller loop: Dictation, recognition and typing. Runs on its own
     /// thread so Whisper decoding never blocks the tray's message loop.
     fn worker(paths: AppPaths, verbose: bool, tray: TrayHandle, commands: Sender<TrayCommand>) {
+        // Decoding runs on this thread: keep it below the hook and audio threads.
+        thread_priority::set_current_below_normal();
+        let wake = Wake::new();
         let clock = SystemClock(Instant::now());
         let logger = Logger::new(StdFs, &paths.app_dir, verbose);
         logger.log(clock.now(), Event::new("start"));
@@ -328,18 +337,14 @@ mod host {
         let settings_file = ConfigFile::<Settings>::open(paths.settings_file());
         let first = settings_file.value().clone();
 
-        let models_dir = std::env::var_os("ALOUDTYPE_MODEL_DIR").map(PathBuf::from).unwrap_or_else(|| paths.models_dir());
+        // Only checksum-verified models ever load.
+        let models_dir = paths.models_dir();
         let loader: Loader = {
-            let (dir, legacy) = (models_dir.clone(), find_model(&paths, pins::BASE_MODEL_FILE));
+            let dir = models_dir.clone();
             let (settings_path, state_path) = (paths.settings_file(), paths.state_file());
             Arc::new(move |id: &str| {
                 let info = aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
-                let path = match aloud_type_models::verified_path(&dir, info) {
-                    Ok(p) => p,
-                    // Hand-installed development model (no checksum known for it).
-                    Err(_) if legacy.is_some() && std::env::var_os("ALOUDTYPE_MODEL_DIR").is_some() => legacy.clone().unwrap(),
-                    Err(e) => return Err(format!("{e:?}")),
-                };
+                let path = aloud_type_models::verified_path(&dir, info).map_err(|e| format!("{e:?}"))?;
                 use aloud_type_recognizer::gpu;
                 // The probe benchmarks the base q5_1 model (spec); fall back to the model being loaded.
                 let probe_model = aloud_type_models::find("base-q5_1")
@@ -365,13 +370,14 @@ mod host {
             &first.speech_model,
             first.model_memory,
         );
+        residency.set_waker(wake.notifier());
 
         let placement = Placement::from_settings(first.indicator_vertical.as_str(), first.indicator_horizontal.as_str())
             .unwrap_or_else(|| Placement::from_settings("bottom", "center").unwrap());
         let overlay = overlay::spawn(placement).ok();
         let mut shown = Shown { overlay: overlay.clone(), tray: tray.clone() };
 
-        let hook = match KeyboardHook::start(HookConfig::default()) {
+        let hook = match KeyboardHook::start_notifying(HookConfig::default(), wake.notifier()) {
             Ok(h) => Rc::new(h),
             Err(e) => {
                 // Stay resident: the tray says the key is unavailable.
@@ -383,15 +389,33 @@ mod host {
             }
         };
         let (sink, fault_slot) = InjectingSink::new(SendInputBackend);
-        let power = PowerWatcher::start().ok();
+        let power = PowerWatcher::start_notifying(wake.notifier()).ok();
 
         // Settings window -> host (suspend/resume keys, reload, GPU re-test).
         let (pipe_tx, pipe_rx): (Sender<PipeCommand>, Receiver<PipeCommand>) = channel();
+        let pipe_wake = wake.notifier();
         let pipe = PipeServer::start(PIPE_NAME, move |c| {
             let _ = pipe_tx.send(c);
+            pipe_wake();
         });
         if pipe.is_err() {
             logger.log(clock.now(), Event::new("pipe_unavailable"));
+        }
+
+        // The settings file is watched by the kernel; a change wakes the worker.
+        let settings_dirty = Arc::new(AtomicBool::new(false));
+        {
+            let (dirty, notify) = (settings_dirty.clone(), wake.notifier());
+            let file = paths.settings_file();
+            let changed: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                dirty.store(true, Ordering::SeqCst);
+                notify();
+            });
+            if let (Some(dir), Some(name)) = (file.parent(), file.file_name().and_then(|n| n.to_str())) {
+                if watch_file(dir, name, changed).is_err() {
+                    logger.log(clock.now(), Event::new("settings_watch_unavailable"));
+                }
+            }
         }
 
         let lifecycle = Rc::new(Cell::new(None));
@@ -416,8 +440,8 @@ mod host {
         let dictation = settings_host.dictation_settings();
 
         let find_vad = {
-            let p = paths.clone();
-            Box::new(move || find_model(&p, pins::VAD_MODEL_FILE))
+            let dir = models_dir.clone();
+            Box::new(move || aloud_type_models::verified_path(&dir, &aloud_type_models::VAD_MODEL).ok())
         };
         let mut c = Controller::new(Parts {
             keyboard: SharedHook(hook.clone()),
@@ -436,7 +460,6 @@ mod host {
         let p = paths.clone();
         c.set_setup_gate(Box::new(Setup { complete: Box::new(move || setup_complete(&p)), commands }));
 
-        println!("Aloud Type is running.");
         let controller = RefCell::new(c);
         let settings_host = RefCell::new(settings_host);
         let publisher = RefCell::new(Publisher::default());
@@ -456,15 +479,41 @@ mod host {
             let now = describe(&c.indicator(), &c.tray(), hook.key_unavailable());
             let mut l = last.borrow_mut();
             if *l != now {
-                println!("{now}");
+                if verbose {
+                    println!("{now}");
+                }
                 logger.log(clock.now(), Event::new("state_changed"));
                 *l = now;
             }
         };
+        let background = RefCell::new((BackgroundModels::default(), ExeBackground::default()));
+        let last_loaded = RefCell::new(None::<String>);
         let body = || loop {
+            // Anything that can change what is due: a command, a changed file, a finished load.
+            let mut recheck_downloads = false;
             while let Ok(cmd) = pipe_rx.try_recv() {
                 settings_host.borrow_mut().on_command(cmd);
                 logger.log(clock.now(), Event::new("settings_command"));
+                recheck_downloads = true;
+            }
+            if settings_dirty.swap(false, Ordering::SeqCst) {
+                settings_host.borrow_mut().reload();
+                logger.log(clock.now(), Event::new("settings_file_changed"));
+                recheck_downloads = true;
+            }
+            let loaded = residency.loaded_model();
+            if loaded != *last_loaded.borrow() {
+                recheck_downloads |= loaded.is_some();
+                *last_loaded.borrow_mut() = loaded;
+            }
+            if recheck_downloads {
+                let mut bg = background.borrow_mut();
+                bg.0.rearm();
+                if let Some(settings) = settings_host.borrow().settings() {
+                    let state = ConfigFile::<State>::open(paths.state_file());
+                    let (checker, spawner) = &mut *bg;
+                    checker.check(settings, state.value(), &models_dir, spawner);
+                }
             }
             let mut c = controller.borrow_mut();
             if let Some(l) = lifecycle.take() {
@@ -486,8 +535,10 @@ mod host {
                 }
             }
             publish(&c);
+            let next = c.poll_interval();
             drop(c);
-            std::thread::sleep(Duration::from_millis(20));
+            // Idle: block until a key, command, power event or load wakes us.
+            wake.wait(next);
         };
         let report = |r| {
             logger.log(clock.now(), Event::new("worker_report"));
@@ -501,18 +552,22 @@ mod host {
         publish(&controller.borrow());
         hook.set_suspended(true);
         let shown_at = Instant::now();
+        let mut hidden = false;
         loop {
             while let Ok(cmd) = pipe_rx.try_recv() {
                 if cmd != PipeCommand::SuspendKeys && cmd != PipeCommand::ResumeKeys {
                     settings_host.borrow_mut().on_command(cmd);
                 }
             }
-            if shown_at.elapsed() > Duration::from_secs(6) {
+            let left = Duration::from_secs(6).saturating_sub(shown_at.elapsed());
+            if left.is_zero() && !hidden {
+                hidden = true;
                 if let Some(o) = &overlay {
                     o.set_indicator(Indicator::Hidden);
                 }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            // Nothing left to time once the fault is hidden: sleep until a command arrives.
+            wake.wait(if hidden { None } else { Some(left) });
         }
     }
 }
