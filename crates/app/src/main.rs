@@ -8,6 +8,14 @@
 //! watcher and Settings pipe each have their own thread.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(all(
+    windows,
+    target_env = "msvc",
+    target_arch = "x86_64",
+    feature = "vulkan"
+))]
+mod vulkan_guard;
+
 #[cfg(not(windows))]
 fn main() {
     eprintln!("Aloud Type runs on Windows only.");
@@ -362,6 +370,8 @@ mod host {
         let loader: Loader = {
             let dir = models_dir.clone();
             let (settings_path, state_path) = (paths.settings_file(), paths.state_file());
+            let log_dir = paths.app_dir.clone();
+            let clock = SystemClock(clock.0);
             Arc::new(move |id: &str| {
                 let info =
                     aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
@@ -384,6 +394,14 @@ mod host {
                     &gpu::installed_adapters(),
                     &runner,
                     gpu::PROBE_TIMEOUT,
+                );
+                Logger::new(StdFs, &log_dir, verbose).log(
+                    clock.now(),
+                    Event::new(if m.using_gpu() {
+                        "speech_model_on_gpu"
+                    } else {
+                        "speech_model_on_cpu"
+                    }),
                 );
                 Ok(Box::new(m) as Model)
             })

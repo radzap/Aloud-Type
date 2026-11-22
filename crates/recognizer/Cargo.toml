@@ -7,6 +7,8 @@ license.workspace = true
 [dependencies]
 aloud-type-core.workspace = true
 whisper-rs = "=0.16.0"
+# The version whisper-rs 0.16.0 builds on; used directly for the ggml backend registry.
+whisper-rs-sys = "=0.15.0"
 num_cpus = "1"
 aloud-type-config = { path = "../config" }
 

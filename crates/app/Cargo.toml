@@ -13,6 +13,10 @@ name = "aloud_type_app"
 name = "aloud-type"
 path = "src/main.rs"
 
+[features]
+# GPU acceleration through Vulkan (needs the Vulkan SDK to build). Release builds turn it on.
+vulkan = ["aloud-type-recognizer/vulkan"]
+
 [dependencies]
 aloud-type-core.workspace = true
 aloud-type-config = { path = "../config" }

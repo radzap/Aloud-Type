@@ -130,38 +130,21 @@ impl WhisperRecognizer {
 
         let mut out = Vec::new();
         for seg in self.state.as_iter() {
-            let mut words: Vec<Word> = Vec::new();
-            let mut continuing = false;
+            let mut pieces = Vec::new();
             for i in 0..seg.n_tokens() {
                 let Some(tok) = seg.get_token(i) else {
                     continue;
                 };
-                let text = tok.to_str_lossy().map_err(|e| err("token text", e))?;
-                // Special tokens (<|...|>, [_TT_..]) carry no words.
-                if text.starts_with("[_") || text.starts_with("<|") {
-                    continue;
-                }
+                let bytes = tok.to_bytes().map_err(|e| err("token text", e))?;
                 let d = tok.token_data();
-                let (s, e) = ((d.t0.max(0) as Millis) * 10, (d.t1.max(0) as Millis) * 10);
-                let p = tok.token_probability();
-                if continuing && !text.starts_with(' ') && !words.is_empty() {
-                    let w = words.last_mut().unwrap();
-                    w.text.push_str(&text);
-                    w.end_ms = e.max(w.end_ms);
-                    w.confidence = w.confidence.min(p); // a word is as sure as its weakest piece
-                } else if !text.trim().is_empty() {
-                    words.push(Word {
-                        text: text.trim_start().to_string(),
-                        start_ms: s,
-                        end_ms: e.max(s),
-                        confidence: p,
-                    });
-                    continuing = true;
-                } else {
-                    continuing = false;
-                }
+                pieces.push(TokenPiece {
+                    bytes,
+                    start_ms: (d.t0.max(0) as Millis) * 10,
+                    end_ms: (d.t1.max(0) as Millis) * 10,
+                    confidence: tok.token_probability(),
+                });
             }
-            // Punctuation-only tokens attach to the previous word via the branch above.
+            let words = assemble_words(&pieces);
             out.push(Segment {
                 text: seg
                     .to_str_lossy()
@@ -174,6 +157,62 @@ impl WhisperRecognizer {
         }
         Ok(out)
     }
+}
+
+/// One decoded token as raw bytes. Whisper's tokens are byte-level: a multi-byte UTF-8
+/// character (Slovak "Č", "ť", ...) can be split across two tokens, so a token on its own is
+/// not always valid UTF-8.
+pub struct TokenPiece<'a> {
+    pub bytes: &'a [u8],
+    pub start_ms: Millis,
+    pub end_ms: Millis,
+    pub confidence: f32,
+}
+
+/// Join tokens into words. A token starting with a space starts a new word; others continue
+/// the current word (word pieces, punctuation, the rest of a split character). Bytes are
+/// collected per word and decoded only once the word is complete. Special tokens
+/// (`<|...|>`, `[_TT_..]`) carry no words.
+pub fn assemble_words(tokens: &[TokenPiece]) -> Vec<Word> {
+    struct Building {
+        bytes: Vec<u8>,
+        start_ms: Millis,
+        end_ms: Millis,
+        confidence: f32,
+    }
+    let mut words: Vec<Building> = Vec::new();
+    let mut continuing = false;
+    for t in tokens {
+        let b = t.bytes;
+        if b.starts_with(b"[_") || b.starts_with(b"<|") {
+            continue;
+        }
+        if continuing && b.first() != Some(&b' ') && !words.is_empty() {
+            let w = words.last_mut().unwrap();
+            w.bytes.extend_from_slice(b);
+            w.end_ms = t.end_ms.max(w.end_ms);
+            w.confidence = w.confidence.min(t.confidence); // as sure as its weakest piece
+        } else if !b.iter().all(u8::is_ascii_whitespace) {
+            words.push(Building {
+                bytes: b.to_vec(),
+                start_ms: t.start_ms,
+                end_ms: t.end_ms.max(t.start_ms),
+                confidence: t.confidence,
+            });
+            continuing = true;
+        } else {
+            continuing = false;
+        }
+    }
+    words
+        .into_iter()
+        .map(|w| Word {
+            text: String::from_utf8_lossy(&w.bytes).trim_start().to_string(),
+            start_ms: w.start_ms,
+            end_ms: w.end_ms,
+            confidence: w.confidence,
+        })
+        .collect()
 }
 
 impl Recognizer for WhisperRecognizer {
@@ -234,5 +273,52 @@ mod tests {
             .map(|&c| decode_threads(c))
             .collect();
         assert_eq!(got, [1, 1, 2, 3, 4, 4, 4, 4]);
+    }
+
+    fn piece(bytes: &[u8], start_ms: Millis) -> TokenPiece<'_> {
+        TokenPiece {
+            bytes,
+            start_ms,
+            end_ms: start_ms + 100,
+            confidence: 0.9,
+        }
+    }
+
+    fn texts(tokens: &[TokenPiece]) -> Vec<String> {
+        assemble_words(tokens).into_iter().map(|w| w.text).collect()
+    }
+
+    #[test]
+    fn a_character_split_across_tokens_is_decoded_whole() {
+        // "Čo má toto znamenať" where "Č" (C4 8C) and "ť" (C5 A5) are each split in two tokens.
+        let toks = [
+            piece(b"<|sk|>", 0),
+            piece(b" \xC4", 0),
+            piece(b"\x8Co", 100),
+            piece(" má".as_bytes(), 200),
+            piece(b" toto", 300),
+            piece(b" znamena", 400),
+            piece(b"\xC5", 500),
+            piece(b"\xA5", 500),
+            piece(b"?", 600),
+        ];
+        assert_eq!(texts(&toks), ["Čo", "má", "toto", "znamenať?"]);
+    }
+
+    #[test]
+    fn words_keep_their_span_and_weakest_confidence() {
+        let mut b = piece(b"llo", 100);
+        b.confidence = 0.4;
+        let w = assemble_words(&[piece(b" he", 0), b]);
+        assert_eq!(w.len(), 1);
+        assert_eq!(w[0].text, "hello");
+        assert_eq!((w[0].start_ms, w[0].end_ms), (0, 200));
+        assert_eq!(w[0].confidence, 0.4);
+    }
+
+    #[test]
+    fn special_and_blank_tokens_make_no_words() {
+        let toks = [piece(b"[_TT_50]", 0), piece(b" ", 0), piece(b" hi", 0)];
+        assert_eq!(texts(&toks), ["hi"]);
     }
 }

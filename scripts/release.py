@@ -1,9 +1,13 @@
 """Build a release: portable zip and (when Inno Setup is installed) the per-user installer.
 
-  python scripts/release.py [--skip-build] [--target x86_64-pc-windows-msvc]
+  python scripts/release.py [--skip-build] [--cpu-only] [--target x86_64-pc-windows-msvc]
 
-Environment: LIBCLANG_PATH for the build; ALOUDTYPE_SIGN_PFX / ALOUDTYPE_SIGN_PASSWORD to sign
-(otherwise the release is unsigned); ISCC to point at ISCC.exe.
+Environment: LIBCLANG_PATH for the build; VULKAN_SDK (set by the Vulkan SDK installer) for the
+GPU backend, which release builds include unless --cpu-only; ALOUDTYPE_TARGET_DIR for the Cargo
+target folder (default: <drive>:\aloudtype-build, because the Vulkan build's nested CMake
+paths exceed the 260-character Windows path limit under the repo's own target folder);
+ALOUDTYPE_SIGN_PFX / ALOUDTYPE_SIGN_PASSWORD to sign (otherwise the release is unsigned); ISCC to
+point at ISCC.exe.
 """
 import argparse
 import os
@@ -32,6 +36,36 @@ def sign(path):
         subprocess.run(cmd, check=True)
 
 
+# The Vulkan build nests CMake scratch files 228 characters below Cargo's profile folder
+# (<target-dir>/release), and MSBuild cannot write paths over 259 characters.
+MAX_PROFILE_DIR_LEN = 31
+
+
+def target_dir():
+    return Path(os.environ.get("ALOUDTYPE_TARGET_DIR") or Path(ROOT.anchor) / "aloudtype-build")
+
+
+def host_triple():
+    out = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout
+    return re.search(r"^host:\s*(\S+)", out, re.M).group(1)
+
+
+def profile_dir(target, host):
+    """Where Cargo puts the release build. For the host target `--target` is left out, which saves
+    the `<triple>` folder level (23 characters of the path budget)."""
+    return target_dir() / "release" if target == host else target_dir() / target / "release"
+
+
+def build_command(target, host, gpu=True):
+    cmd = ["cargo", "build", "--release", "--locked", "-p", "aloud-type-app", "-p", "aloud-type-settings-ui",
+           "--target-dir", str(target_dir())]
+    if target != host:
+        cmd += ["--target", target]
+    if gpu:
+        cmd += ["--features", "aloud-type-app/vulkan"]
+    return cmd
+
+
 def find_iscc():
     for c in (os.environ.get("ISCC"), shutil.which("iscc"),
               str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Inno Setup 6/ISCC.exe"),
@@ -45,8 +79,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--target", default="x86_64-pc-windows-msvc")
+    ap.add_argument("--cpu-only", action="store_true", help="build without the Vulkan GPU backend")
     a = ap.parse_args()
     version = workspace_version()
+    host = host_triple()
 
     bad = audit.scan_sources(ROOT) + [f"resident process links network crate: {c}"
                                       for c in audit.network_crates(audit.cargo_tree(ROOT, "aloud-type-app"))]
@@ -54,10 +90,14 @@ def main():
         sys.exit("no-network audit failed:\n" + "\n".join(bad))
 
     if not a.skip_build:
-        subprocess.run(["cargo", "build", "--release", "--locked", "-p", "aloud-type-app", "-p", "aloud-type-settings-ui",
-                        "--target", a.target],
-                       cwd=ROOT, check=True)
-    exe_src = ROOT / "target" / a.target / "release" / "aloud-type.exe"
+        if not a.cpu_only and not os.environ.get("VULKAN_SDK"):
+            sys.exit("VULKAN_SDK is not set: install the Vulkan SDK (winget install KhronosGroup.VulkanSDK) and "
+                     "open a new terminal, or pass --cpu-only for a build without GPU acceleration.")
+        if not a.cpu_only and len(str(profile_dir(a.target, host))) > MAX_PROFILE_DIR_LEN:
+            sys.exit(f"build folder {profile_dir(a.target, host)} is too long for the Vulkan build (over "
+                     f"{MAX_PROFILE_DIR_LEN} characters): set ALOUDTYPE_TARGET_DIR to a short folder such as C:\\atb.")
+        subprocess.run(build_command(a.target, host, gpu=not a.cpu_only), cwd=ROOT, check=True)
+    exe_src = profile_dir(a.target, host) / "aloud-type.exe"
     settings_src = exe_src.with_name("aloud-type-settings-ui.exe")
     for built in (exe_src, settings_src):
         if not built.is_file():

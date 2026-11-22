@@ -322,7 +322,13 @@ fn the_child_reports_its_verdict_over_stdout_and_is_told_the_device() {
     assert_eq!(got, v);
     assert_eq!(
         *child.1.borrow(),
-        vec!["--probe-gpu".to_string(), "--device".into(), "2".into()]
+        vec![
+            "--probe-gpu".to_string(),
+            "--device".into(),
+            "2".into(),
+            "--device-name".into(),
+            "RTX".into()
+        ]
     );
 }
 
@@ -601,7 +607,7 @@ fn the_probe_child_body_rejects_when_the_backend_library_will_not_load() {
 
 #[test]
 fn display_adapters_and_driver_versions_come_from_registry_output_without_loading_a_gpu_backend() {
-    let k = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bf1c-08002be10318}";
+    let k = r"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
     let lines = [
         String::new(),
         format!(r"{k}\0000"),
@@ -767,4 +773,54 @@ fn a_mid_dictation_gpu_error_is_recorded_in_the_state_file_and_survives_restart(
             .value()
             .gpu_disabled_after_error
     );
+}
+
+#[test]
+fn adapters_are_read_from_the_display_adapter_device_class() {
+    // GUID_DEVCLASS_DISPLAY. A wrong GUID finds no adapters, so the GPU is never probed.
+    assert!(DISPLAY_CLASS_KEY.ends_with(r"\{4d36e968-e325-11ce-bfc1-08002be10318}"));
+}
+
+fn names(n: &[&str]) -> Vec<String> {
+    n.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn registry_adapters_are_matched_to_the_backend_device_order_by_name() {
+    // Registry order: Intel 0, NVIDIA 1. Vulkan order: discrete first.
+    let vk = names(&[
+        "NVIDIA GeForce RTX 3060 Laptop GPU",
+        "Intel(R) Iris(R) Xe Graphics",
+    ]);
+    let mut intel = dev("Intel(R) Iris(R) Xe Graphics", "30.0.101.2079");
+    intel.index = 0;
+    let mut nvidia = dev("NVIDIA GeForce RTX 3060 Laptop GPU", "32.0.15.6109");
+    nvidia.index = 1;
+    assert_eq!(backend_index(&vk, &intel), Some(1));
+    assert_eq!(backend_index(&vk, &nvidia), Some(0));
+}
+
+#[test]
+fn backend_names_match_ignoring_case_and_extra_words() {
+    let vk = names(&["AMD Radeon(TM) 780M Graphics (RADV PHOENIX)"]);
+    assert_eq!(
+        backend_index(&vk, &dev("amd radeon(tm) 780m graphics", "1")),
+        Some(0)
+    );
+}
+
+#[test]
+fn an_adapter_the_backend_cannot_see_has_no_backend_index() {
+    let vk = names(&["NVIDIA GeForce RTX 3060 Laptop GPU"]);
+    assert_eq!(
+        backend_index(&vk, &dev("Microsoft Hyper-V Video", "1")),
+        None
+    );
+}
+
+#[test]
+fn a_probe_started_with_only_an_index_keeps_that_index() {
+    let mut d = dev("", "");
+    d.index = 1;
+    assert_eq!(backend_index(&names(&["a", "b"]), &d), Some(1));
 }

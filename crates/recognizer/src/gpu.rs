@@ -250,10 +250,14 @@ pub fn parse_verdict(stdout: &str) -> Option<Verdict> {
 /// Run the probe for `device` in a child process. A hung, crashed or garbled child is a rejection
 /// of that device; it can never affect the calling (resident) process.
 pub fn probe_in_child(runner: &dyn ChildRunner, device: &GpuDevice, timeout: Duration) -> Verdict {
+    // The name lets the child find the device in the backend's own order, which differs from
+    // the registry order the index comes from.
     let args = vec![
         PROBE_FLAG.to_string(),
         "--device".into(),
         device.index.to_string(),
+        "--device-name".into(),
+        device.name.clone(),
     ];
     match runner.run(&args, timeout) {
         ChildOutcome::TimedOut => Verdict::rejected(
@@ -504,18 +508,47 @@ pub fn parse_display_adapters(reg_output: &str) -> Vec<GpuDevice> {
     out
 }
 
+/// Index of `device` among the GPU backend's devices (`backend_names`, in backend order).
+/// Adapters are discovered from the registry, whose order differs from the backend's (Vulkan
+/// lists discrete GPUs first), so devices are matched by name: exact (ignoring case), else one
+/// name containing the other. A device without a name (probe started by hand with only
+/// `--device N`) keeps its index. `None`: the backend cannot see this adapter.
+pub fn backend_index(backend_names: &[String], device: &GpuDevice) -> Option<i32> {
+    let want = device.name.trim().to_lowercase();
+    if want.is_empty() {
+        return Some(device.index);
+    }
+    let names: Vec<String> = backend_names
+        .iter()
+        .map(|n| n.trim().to_lowercase())
+        .collect();
+    names
+        .iter()
+        .position(|n| *n == want)
+        .or_else(|| {
+            names
+                .iter()
+                .position(|n| !n.is_empty() && (n.contains(&want) || want.contains(n.as_str())))
+        })
+        .map(|i| i as i32)
+}
+
 fn value_of(line: &str, name: &str) -> Option<String> {
     let rest = line.strip_prefix(name)?.trim_start();
     let rest = rest.strip_prefix("REG_SZ")?;
     Some(rest.trim().to_string())
 }
 
+/// Registry key of the Windows "Display adapters" device class (GUID_DEVCLASS_DISPLAY).
+pub const DISPLAY_CLASS_KEY: &str =
+    r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
+
 /// Installed display adapters, via `reg.exe` (Windows only; empty elsewhere or on failure).
 pub fn installed_adapters() -> Vec<GpuDevice> {
     #[cfg(windows)]
     {
         let out = Command::new("reg")
-            .args(["query", r"HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bf1c-08002be10318}", "/s"])
+            .args(["query", DISPLAY_CLASS_KEY, "/s"])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
             .output();
@@ -563,11 +596,18 @@ impl WhisperBackend {
 
 impl GpuBackend for WhisperBackend {
     fn load_library(&self) -> Result<(), RecognizerError> {
-        // With the optional-DLL build this is where the backend DLL gets loaded. In the current
-        // static build, enumerating the Vulkan devices initialises the backend (and fails if
-        // vulkan-1.dll or a driver is missing).
+        // The backend is linked statically. ggml's backend registry initialises Vulkan and
+        // catches its errors (no vulkan-1.dll, no driver, Vulkan below 1.2), leaving the backend
+        // unregistered. Enumerating devices directly would throw across the FFI boundary then,
+        // so check the registry first.
         #[cfg(feature = "vulkan")]
         {
+            let reg = unsafe { whisper_rs_sys::ggml_backend_reg_by_name(c"Vulkan".as_ptr()) };
+            if reg.is_null() {
+                return Err(RecognizerError(
+                    "Vulkan is unavailable (no vulkan-1.dll or no Vulkan 1.2 driver)".into(),
+                ));
+            }
             if whisper_rs::vulkan::list_devices().is_empty() {
                 return Err(RecognizerError("no Vulkan device".into()));
             }
@@ -584,10 +624,22 @@ impl GpuBackend for WhisperBackend {
         )?))
     }
     fn load_gpu(&self, device: &GpuDevice) -> Result<Box<dyn Engine>, RecognizerError> {
+        #[cfg(feature = "vulkan")]
+        let index = {
+            let names: Vec<String> = whisper_rs::vulkan::list_devices()
+                .into_iter()
+                .map(|d| d.name)
+                .collect();
+            backend_index(&names, device).ok_or_else(|| {
+                RecognizerError(format!("Vulkan does not list the GPU \"{}\"", device.name))
+            })?
+        };
+        #[cfg(not(feature = "vulkan"))]
+        let index = device.index;
         Ok(Box::new(WhisperRecognizer::load_on(
             &self.model,
             self.threads,
-            Some(device.index),
+            Some(index),
         )?))
     }
 }
@@ -619,8 +671,9 @@ pub fn decode_wav(b: &[u8]) -> Option<Vec<f32>> {
     None
 }
 
-/// Entry point of `--probe-gpu --device N --model PATH`: benchmark, print the verdict line, and
-/// return the process exit code. Runs inside the child process only.
+/// Entry point of `--probe-gpu --device N [--device-name NAME] --model PATH`: benchmark, print
+/// the verdict line, and return the process exit code. Runs inside the child process only.
+/// With a name, the device is looked up by name in the backend's list (see [`backend_index`]).
 pub fn probe_child_main(args: &[String]) -> i32 {
     let arg = |name: &str| {
         args.iter()
@@ -639,7 +692,7 @@ pub fn probe_child_main(args: &[String]) -> i32 {
     };
     let backend = WhisperBackend::new(Path::new(model));
     let device = GpuDevice {
-        name: String::new(),
+        name: arg("--device-name").cloned().unwrap_or_default(),
         driver: String::new(),
         index,
     };
