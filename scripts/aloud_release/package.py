@@ -5,9 +5,9 @@ from pathlib import Path
 TIMESTAMP_URL = "http://timestamp.digicert.com"
 
 
-def build_zip(out, *, version, exe, licence, notices, readme, extra_files=()):
+def build_zip(out, *, version, exe, settings_exe, licence, notices, readme, extra_files=()):
     top = f"AloudType-{version}"
-    files = [Path(exe), Path(licence), Path(notices), Path(readme), *map(Path, extra_files)]
+    files = [Path(exe), Path(settings_exe), Path(licence), Path(notices), Path(readme), *map(Path, extra_files)]
     for f in files:
         if not f.is_file():
             raise FileNotFoundError(f)

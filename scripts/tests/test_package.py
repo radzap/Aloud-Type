@@ -12,20 +12,22 @@ class PortableZip(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.d = Path(self.tmp.name)
         (self.d / "aloud-type.exe").write_bytes(b"MZ")
+        (self.d / "aloud-type-settings-ui.exe").write_bytes(b"MZ")
         (self.d / "LICENSE").write_text("AGPL")
         (self.d / "THIRD-PARTY-NOTICES.txt").write_text("notices")
         (self.d / "README.txt").write_text("readme")
 
     def build(self, **kw):
         out = self.d / "out.zip"
-        package.build_zip(out, version="0.1.0", exe=self.d / "aloud-type.exe", licence=self.d / "LICENSE",
+        package.build_zip(out, version="0.1.0", exe=self.d / "aloud-type.exe",
+                          settings_exe=self.d / "aloud-type-settings-ui.exe", licence=self.d / "LICENSE",
                           notices=self.d / "THIRD-PARTY-NOTICES.txt", readme=self.d / "README.txt", **kw)
         return zipfile.ZipFile(out).namelist()
 
-    def test_zip_holds_exe_licence_notices_readme_under_one_versioned_folder(self):
+    def test_zip_holds_both_exes_licence_notices_readme_under_one_versioned_folder(self):
         names = self.build()
         self.assertCountEqual(names, [
-            "AloudType-0.1.0/aloud-type.exe", "AloudType-0.1.0/LICENSE",
+            "AloudType-0.1.0/aloud-type.exe", "AloudType-0.1.0/aloud-type-settings-ui.exe", "AloudType-0.1.0/LICENSE",
             "AloudType-0.1.0/THIRD-PARTY-NOTICES.txt", "AloudType-0.1.0/README.txt"])
 
     def test_gpu_backend_libraries_are_included_when_the_build_has_them(self):
