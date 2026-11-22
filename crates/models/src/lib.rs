@@ -26,7 +26,10 @@ macro_rules! model {
             id: $id,
             label: $label,
             file: $file,
-            url: concat!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/", $file),
+            url: concat!(
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/",
+                $file
+            ),
             size: $size,
             sha256: $sha,
             english_only: $en,
@@ -37,18 +40,54 @@ macro_rules! model {
 /// Supported models, first-run model first. Sizes and SHA-256 values are the
 /// ones published by the whisper.cpp repository on Hugging Face (LFS metadata).
 pub const CATALOG: &[ModelInfo] = &[
-    model!("base-q5_1", "Base (multilingual)", "ggml-base-q5_1.bin", 59_707_625,
-        "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898", false),
-    model!("small-q5_1", "Small (multilingual)", "ggml-small-q5_1.bin", 190_085_487,
-        "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb", false),
-    model!("base.en-q5_1", "Base (English only)", "ggml-base.en-q5_1.bin", 59_721_011,
-        "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f", true),
-    model!("small.en-q5_1", "Small (English only)", "ggml-small.en-q5_1.bin", 190_098_681,
-        "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30", true),
-    model!("tiny.en-q5_1", "Tiny (English only, weak PCs)", "ggml-tiny.en-q5_1.bin", 32_166_155,
-        "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b", true),
-    model!("large-v3-turbo-q5_0", "Large v3 turbo (needs a GPU)", "ggml-large-v3-turbo-q5_0.bin", 574_041_195,
-        "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", false),
+    model!(
+        "base-q5_1",
+        "Base (multilingual)",
+        "ggml-base-q5_1.bin",
+        59_707_625,
+        "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
+        false
+    ),
+    model!(
+        "small-q5_1",
+        "Small (multilingual)",
+        "ggml-small-q5_1.bin",
+        190_085_487,
+        "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+        false
+    ),
+    model!(
+        "base.en-q5_1",
+        "Base (English only)",
+        "ggml-base.en-q5_1.bin",
+        59_721_011,
+        "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
+        true
+    ),
+    model!(
+        "small.en-q5_1",
+        "Small (English only)",
+        "ggml-small.en-q5_1.bin",
+        190_098_681,
+        "bfdff4894dcb76bbf647d56263ea2a96645423f1669176f4844a1bf8e478ad30",
+        true
+    ),
+    model!(
+        "tiny.en-q5_1",
+        "Tiny (English only, weak PCs)",
+        "ggml-tiny.en-q5_1.bin",
+        32_166_155,
+        "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b",
+        true
+    ),
+    model!(
+        "large-v3-turbo-q5_0",
+        "Large v3 turbo (needs a GPU)",
+        "ggml-large-v3-turbo-q5_0.bin",
+        574_041_195,
+        "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        false
+    ),
 ];
 
 /// The Silero voice-activity model that keeps silence away from Whisper. Not
@@ -118,7 +157,10 @@ pub fn verified_path(dir: &Path, m: &ModelInfo) -> Result<PathBuf, VerifyError> 
         _ => VerifyError::Io(e),
     })?;
     if meta.len() != m.size {
-        return Err(VerifyError::WrongSize { expected: m.size, found: meta.len() });
+        return Err(VerifyError::WrongSize {
+            expected: m.size,
+            found: meta.len(),
+        });
     }
     match sha256_file(&p) {
         Ok(h) if h.eq_ignore_ascii_case(m.sha256) => Ok(p),
@@ -131,7 +173,9 @@ pub fn verified_path(dir: &Path, m: &ModelInfo) -> Result<PathBuf, VerifyError> 
 /// file exists with the right size. Files only reach the models folder after a
 /// full verification by the downloader, so this is not a loading gate.
 pub fn is_installed(dir: &Path, m: &ModelInfo) -> bool {
-    std::fs::metadata(model_path(dir, m)).map(|x| x.len() == m.size).unwrap_or(false)
+    std::fs::metadata(model_path(dir, m))
+        .map(|x| x.len() == m.size)
+        .unwrap_or(false)
 }
 
 /// First-run completion: a usable Speech model is installed.
@@ -180,7 +224,15 @@ mod tests {
     // sha256("hello") from an independent source.
     const HELLO: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
     fn tiny() -> ModelInfo {
-        ModelInfo { id: "t", label: "t", file: "ggml-t.bin", url: "", size: 5, sha256: HELLO, english_only: false }
+        ModelInfo {
+            id: "t",
+            label: "t",
+            file: "ggml-t.bin",
+            url: "",
+            size: 5,
+            sha256: HELLO,
+            english_only: false,
+        }
     }
 
     #[test]
@@ -194,11 +246,20 @@ mod tests {
     fn unverified_files_are_refused() {
         let d = tempfile::tempdir().unwrap();
         let m = tiny();
-        assert!(matches!(verified_path(d.path(), &m), Err(VerifyError::Missing)));
+        assert!(matches!(
+            verified_path(d.path(), &m),
+            Err(VerifyError::Missing)
+        ));
         std::fs::write(d.path().join("ggml-t.bin"), b"hell").unwrap();
-        assert!(matches!(verified_path(d.path(), &m), Err(VerifyError::WrongSize { .. })));
+        assert!(matches!(
+            verified_path(d.path(), &m),
+            Err(VerifyError::WrongSize { .. })
+        ));
         std::fs::write(d.path().join("ggml-t.bin"), b"hellp").unwrap();
-        assert!(matches!(verified_path(d.path(), &m), Err(VerifyError::WrongChecksum)));
+        assert!(matches!(
+            verified_path(d.path(), &m),
+            Err(VerifyError::WrongChecksum)
+        ));
     }
 
     #[test]
@@ -233,12 +294,21 @@ mod tests {
 
     fn installed_base(dir: &Path) {
         let m = find(FIRST_RUN_MODEL).unwrap();
-        std::fs::File::create(model_path(dir, m)).unwrap().set_len(m.size).unwrap();
+        std::fs::File::create(model_path(dir, m))
+            .unwrap()
+            .set_len(m.size)
+            .unwrap();
     }
 
     fn confirmed_gpu() -> State {
         let mut st = State::default();
-        st.gpu_probes.insert("RTX 4060|31.0.1".into(), aloud_type_config::GpuProbe { approved: true, speedup: 3.0 });
+        st.gpu_probes.insert(
+            "RTX 4060|31.0.1".into(),
+            aloud_type_config::GpuProbe {
+                approved: true,
+                speedup: 3.0,
+            },
+        );
         st
     }
 
@@ -252,7 +322,10 @@ mod tests {
     #[test]
     fn nothing_downloads_in_the_background_before_first_run_is_complete() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(background_work(&Settings::default(), &confirmed_gpu(), d.path()), BackgroundWork::default());
+        assert_eq!(
+            background_work(&Settings::default(), &confirmed_gpu(), d.path()),
+            BackgroundWork::default()
+        );
     }
 
     #[test]
@@ -260,28 +333,56 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         installed_base(d.path());
         let w = background_work(&Settings::default(), &State::default(), d.path());
-        assert_eq!(w, BackgroundWork { vad: true, small_default: false });
-        std::fs::File::create(model_path(d.path(), &VAD_MODEL)).unwrap().set_len(VAD_MODEL.size).unwrap();
+        assert_eq!(
+            w,
+            BackgroundWork {
+                vad: true,
+                small_default: false
+            }
+        );
+        std::fs::File::create(model_path(d.path(), &VAD_MODEL))
+            .unwrap()
+            .set_len(VAD_MODEL.size)
+            .unwrap();
         assert!(!background_work(&Settings::default(), &State::default(), d.path()).any());
     }
 
     #[test]
-    fn small_becomes_the_default_only_with_a_confirmed_gpu_the_default_model_and_no_earlier_attempt() {
+    fn small_becomes_the_default_only_with_a_confirmed_gpu_the_default_model_and_no_earlier_attempt(
+    ) {
         let d = tempfile::tempdir().unwrap();
         installed_base(d.path());
         let due = |s: &Settings, st: &State| background_work(s, st, d.path()).small_default;
         assert!(due(&Settings::default(), &confirmed_gpu()));
-        assert!(!due(&Settings::default(), &State::default()), "no confirmed GPU");
+        assert!(
+            !due(&Settings::default(), &State::default()),
+            "no confirmed GPU"
+        );
         let unapproved = {
             let mut st = State::default();
-            st.gpu_probes.insert("x|1".into(), aloud_type_config::GpuProbe { approved: false, speedup: 0.5 });
+            st.gpu_probes.insert(
+                "x|1".into(),
+                aloud_type_config::GpuProbe {
+                    approved: false,
+                    speedup: 0.5,
+                },
+            );
             st
         };
         assert!(!due(&Settings::default(), &unapproved));
-        let cpu_only = Settings { gpu: Gpu::CpuOnly, ..Settings::default() };
+        let cpu_only = Settings {
+            gpu: Gpu::CpuOnly,
+            ..Settings::default()
+        };
         assert!(!due(&cpu_only, &confirmed_gpu()), "user chose CPU only");
-        let chose = Settings { speech_model: "base.en-q5_1".into(), ..Settings::default() };
-        assert!(!due(&chose, &confirmed_gpu()), "the user's own model choice stands");
+        let chose = Settings {
+            speech_model: "base.en-q5_1".into(),
+            ..Settings::default()
+        };
+        assert!(
+            !due(&chose, &confirmed_gpu()),
+            "the user's own model choice stands"
+        );
         let mut errored = confirmed_gpu();
         errored.gpu_disabled_after_error = true;
         assert!(!due(&Settings::default(), &errored));
@@ -289,7 +390,13 @@ mod tests {
         tried.small_upgrade_started = true;
         assert!(!due(&Settings::default(), &tried), "offered once");
         let small = find(GPU_DEFAULT_MODEL).unwrap();
-        std::fs::File::create(model_path(d.path(), small)).unwrap().set_len(small.size).unwrap();
-        assert!(!due(&Settings::default(), &confirmed_gpu()), "already installed");
+        std::fs::File::create(model_path(d.path(), small))
+            .unwrap()
+            .set_len(small.size)
+            .unwrap();
+        assert!(
+            !due(&Settings::default(), &confirmed_gpu()),
+            "already installed"
+        );
     }
 }

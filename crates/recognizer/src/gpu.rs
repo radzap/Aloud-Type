@@ -46,14 +46,24 @@ pub struct Verdict {
 
 impl Verdict {
     fn rejected(speedup: f64, reason: impl Into<String>) -> Self {
-        Verdict { approved: false, speedup, reason: reason.into() }
+        Verdict {
+            approved: false,
+            speedup,
+            reason: reason.into(),
+        }
     }
 }
 
 fn words_of(segs: &[Segment]) -> Vec<String> {
     segs.iter()
         .flat_map(|s| s.words.iter())
-        .map(|w| w.text.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase())
+        .map(|w| {
+            w.text
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>()
+                .to_lowercase()
+        })
         .filter(|w| !w.is_empty())
         .collect()
 }
@@ -82,14 +92,25 @@ pub fn benchmark(
         Err(e) => return Verdict::rejected(0.0, format!("GPU decode failed: {e}")),
     };
     let gpu_t = now().saturating_sub(t1);
-    let speedup = if gpu_t.is_zero() { f64::INFINITY } else { cpu_t.as_secs_f64() / gpu_t.as_secs_f64() };
+    let speedup = if gpu_t.is_zero() {
+        f64::INFINITY
+    } else {
+        cpu_t.as_secs_f64() / gpu_t.as_secs_f64()
+    };
     if words_of(&cpu_out) != words_of(&gpu_out) {
         return Verdict::rejected(speedup, "GPU output differs from CPU output");
     }
     if speedup < MIN_SPEEDUP {
-        return Verdict::rejected(speedup, format!("speedup {speedup:.2}x is below {MIN_SPEEDUP}x"));
+        return Verdict::rejected(
+            speedup,
+            format!("speedup {speedup:.2}x is below {MIN_SPEEDUP}x"),
+        );
     }
-    Verdict { approved: true, speedup, reason: format!("speedup {speedup:.2}x") }
+    Verdict {
+        approved: true,
+        speedup,
+        reason: format!("speedup {speedup:.2}x"),
+    }
 }
 
 // ---- selection and per-device cache ----
@@ -98,7 +119,13 @@ use aloud_type_config::{Gpu, GpuProbe, State};
 
 /// Save a probe verdict for its device and driver (the cache entry later reused by [`select`]).
 pub fn record_verdict(state: &mut State, device: &GpuDevice, v: &Verdict) {
-    state.gpu_probes.insert(device.key(), GpuProbe { approved: v.approved, speedup: v.speedup });
+    state.gpu_probes.insert(
+        device.key(),
+        GpuProbe {
+            approved: v.approved,
+            speedup: v.speedup,
+        },
+    );
 }
 
 /// A backend error happened during a Dictation: disable the GPU (recorded in state).
@@ -152,13 +179,22 @@ pub fn select(setting: &Gpu, state: &State, installed: &[GpuDevice]) -> Selectio
     }
     let best = candidates
         .iter()
-        .filter_map(|d| state.gpu_probes.get(&d.key()).filter(|p| p.approved).map(|p| (*d, p.speedup)))
+        .filter_map(|d| {
+            state
+                .gpu_probes
+                .get(&d.key())
+                .filter(|p| p.approved)
+                .map(|p| (*d, p.speedup))
+        })
         .max_by(|a, b| a.1.total_cmp(&b.1));
     if let Some((d, _)) = best {
         return Selection::Gpu(d.clone());
     }
-    let unprobed: Vec<GpuDevice> =
-        candidates.into_iter().filter(|d| !state.gpu_probes.contains_key(&d.key())).cloned().collect();
+    let unprobed: Vec<GpuDevice> = candidates
+        .into_iter()
+        .filter(|d| !state.gpu_probes.contains_key(&d.key()))
+        .cloned()
+        .collect();
     if unprobed.is_empty() {
         Selection::Cpu(CpuReason::NotApproved)
     } else {
@@ -197,24 +233,42 @@ pub fn encode_verdict(v: &Verdict) -> String {
 }
 
 pub fn parse_verdict(stdout: &str) -> Option<Verdict> {
-    let line = stdout.lines().rev().find(|l| l.starts_with(RESULT_PREFIX))?;
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.starts_with(RESULT_PREFIX))?;
     let mut f = line.splitn(4, '\t').skip(1);
     let approved = f.next()?.parse().ok()?;
     let speedup = f.next()?.parse().ok()?;
-    Some(Verdict { approved, speedup, reason: f.next().unwrap_or("").to_string() })
+    Some(Verdict {
+        approved,
+        speedup,
+        reason: f.next().unwrap_or("").to_string(),
+    })
 }
 
 /// Run the probe for `device` in a child process. A hung, crashed or garbled child is a rejection
 /// of that device; it can never affect the calling (resident) process.
 pub fn probe_in_child(runner: &dyn ChildRunner, device: &GpuDevice, timeout: Duration) -> Verdict {
-    let args = vec![PROBE_FLAG.to_string(), "--device".into(), device.index.to_string()];
+    let args = vec![
+        PROBE_FLAG.to_string(),
+        "--device".into(),
+        device.index.to_string(),
+    ];
     match runner.run(&args, timeout) {
-        ChildOutcome::TimedOut => Verdict::rejected(0.0, format!("GPU probe timed out after {}s", timeout.as_secs())),
-        ChildOutcome::SpawnFailed(e) => Verdict::rejected(0.0, format!("GPU probe could not start: {e}")),
-        ChildOutcome::Exited { success: false, .. } => Verdict::rejected(0.0, "GPU probe crashed"),
-        ChildOutcome::Exited { success: true, stdout } => {
-            parse_verdict(&stdout).unwrap_or_else(|| Verdict::rejected(0.0, "GPU probe gave no result"))
+        ChildOutcome::TimedOut => Verdict::rejected(
+            0.0,
+            format!("GPU probe timed out after {}s", timeout.as_secs()),
+        ),
+        ChildOutcome::SpawnFailed(e) => {
+            Verdict::rejected(0.0, format!("GPU probe could not start: {e}"))
         }
+        ChildOutcome::Exited { success: false, .. } => Verdict::rejected(0.0, "GPU probe crashed"),
+        ChildOutcome::Exited {
+            success: true,
+            stdout,
+        } => parse_verdict(&stdout)
+            .unwrap_or_else(|| Verdict::rejected(0.0, "GPU probe gave no result")),
     }
 }
 
@@ -228,17 +282,27 @@ pub struct StdChildRunner {
 impl StdChildRunner {
     /// The current executable (the probe is a mode of the one executable).
     pub fn current_exe() -> std::io::Result<Self> {
-        Ok(Self { program: std::env::current_exe()?, prefix: vec![] })
+        Ok(Self {
+            program: std::env::current_exe()?,
+            prefix: vec![],
+        })
     }
     pub fn with_program(program: impl Into<PathBuf>, prefix: Vec<String>) -> Self {
-        Self { program: program.into(), prefix }
+        Self {
+            program: program.into(),
+            prefix,
+        }
     }
 }
 
 impl ChildRunner for StdChildRunner {
     fn run(&self, args: &[String], timeout: Duration) -> ChildOutcome {
         let mut cmd = Command::new(&self.program);
-        cmd.args(&self.prefix).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd.args(&self.prefix)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -259,7 +323,10 @@ impl ChildRunner for StdChildRunner {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     let stdout = reader.join().unwrap_or_default();
-                    return ChildOutcome::Exited { success: status.success(), stdout };
+                    return ChildOutcome::Exited {
+                        success: status.success(),
+                        stdout,
+                    };
                 }
                 Ok(None) if start.elapsed() >= timeout => {
                     let _ = child.kill();
@@ -303,7 +370,12 @@ pub fn open_recognizer(
     selection: &Selection,
     on_gpu_error: Box<dyn FnMut(&str) + Send>,
 ) -> GpuFallback {
-    let mut r = GpuFallback { backend, gpu: None, cpu: None, on_gpu_error };
+    let mut r = GpuFallback {
+        backend,
+        gpu: None,
+        cpu: None,
+        on_gpu_error,
+    };
     match selection {
         Selection::Gpu(d) => {
             let loaded = r.backend.load_library().and_then(|_| r.backend.load_gpu(d));
@@ -355,16 +427,20 @@ impl GpuFallback {
         if self.cpu.is_none() {
             self.cpu = Some(self.backend.load_cpu()?);
         }
-        self.cpu.as_mut().expect("loaded").try_recognize(audio, language, prompt)
+        self.cpu
+            .as_mut()
+            .expect("loaded")
+            .try_recognize(audio, language, prompt)
     }
 }
 
 impl Recognizer for GpuFallback {
     fn recognize(&mut self, audio: &[f32], language: &str, prompt: Option<&str>) -> Vec<Segment> {
-        self.try_recognize(audio, language, prompt).unwrap_or_else(|e| {
-            eprintln!("recognizer: {e}");
-            Vec::new()
-        })
+        self.try_recognize(audio, language, prompt)
+            .unwrap_or_else(|e| {
+                eprintln!("recognizer: {e}");
+                Vec::new()
+            })
     }
 }
 
@@ -404,7 +480,11 @@ pub fn parse_display_adapters(reg_output: &str) -> Vec<GpuDevice> {
             let l = d.to_lowercase();
             if !l.contains("basic display") && !l.contains("remote display") {
                 let index = out.len() as i32;
-                out.push(GpuDevice { name: d, driver: v, index });
+                out.push(GpuDevice {
+                    name: d,
+                    driver: v,
+                    index,
+                });
             }
         }
         *desc = None;
@@ -474,7 +554,10 @@ pub struct WhisperBackend {
 
 impl WhisperBackend {
     pub fn new(model: &Path) -> Self {
-        Self { model: model.to_path_buf(), threads: crate::decode_threads(num_cpus::get_physical()) }
+        Self {
+            model: model.to_path_buf(),
+            threads: crate::decode_threads(num_cpus::get_physical()),
+        }
     }
 }
 
@@ -494,10 +577,18 @@ impl GpuBackend for WhisperBackend {
         Err(RecognizerError("this build has no GPU backend".into()))
     }
     fn load_cpu(&self) -> Result<Box<dyn Engine>, RecognizerError> {
-        Ok(Box::new(WhisperRecognizer::load_on(&self.model, self.threads, None)?))
+        Ok(Box::new(WhisperRecognizer::load_on(
+            &self.model,
+            self.threads,
+            None,
+        )?))
     }
     fn load_gpu(&self, device: &GpuDevice) -> Result<Box<dyn Engine>, RecognizerError> {
-        Ok(Box::new(WhisperRecognizer::load_on(&self.model, self.threads, Some(device.index))?))
+        Ok(Box::new(WhisperRecognizer::load_on(
+            &self.model,
+            self.threads,
+            Some(device.index),
+        )?))
     }
 }
 
@@ -515,7 +606,12 @@ pub fn decode_wav(b: &[u8]) -> Option<Vec<f32>> {
         if &b[i..i + 4] == b"data" {
             let end = (i + 8 + len).min(b.len());
             return Some(
-                b[i + 8..end].as_chunks::<2>().0.iter().map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0).collect(),
+                b[i + 8..end]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+                    .collect(),
             );
         }
         i += 8 + len + (len & 1);
@@ -526,14 +622,27 @@ pub fn decode_wav(b: &[u8]) -> Option<Vec<f32>> {
 /// Entry point of `--probe-gpu --device N --model PATH`: benchmark, print the verdict line, and
 /// return the process exit code. Runs inside the child process only.
 pub fn probe_child_main(args: &[String]) -> i32 {
-    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1));
-    let (Some(model), Some(index)) = (arg("--model"), arg("--device").and_then(|d| d.parse::<i32>().ok())) else {
+    let arg = |name: &str| {
+        args.iter()
+            .position(|a| a == name)
+            .and_then(|i| args.get(i + 1))
+    };
+    let (Some(model), Some(index)) = (
+        arg("--model"),
+        arg("--device").and_then(|d| d.parse::<i32>().ok()),
+    ) else {
         eprintln!("usage: --probe-gpu --device N --model PATH");
         return 2;
     };
-    let Some(audio) = decode_wav(PROBE_WAV) else { return 2 };
+    let Some(audio) = decode_wav(PROBE_WAV) else {
+        return 2;
+    };
     let backend = WhisperBackend::new(Path::new(model));
-    let device = GpuDevice { name: String::new(), driver: String::new(), index };
+    let device = GpuDevice {
+        name: String::new(),
+        driver: String::new(),
+        index,
+    };
     let t0 = std::time::Instant::now();
     let v = probe_with_backend(&backend, &device, &audio, "en", &move || t0.elapsed());
     println!("{}", encode_verdict(&v));
@@ -588,5 +697,9 @@ pub fn open_for_host(
         selection = select(setting, &state, adapters);
     }
     let path = state_path.to_path_buf();
-    open_recognizer(backend, &selection, Box::new(move |_| update_state(&path, record_gpu_error)))
+    open_recognizer(
+        backend,
+        &selection,
+        Box::new(move |_| update_state(&path, record_gpu_error)),
+    )
 }

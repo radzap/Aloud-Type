@@ -8,8 +8,14 @@ pub const CAPTURE_TIMEOUT_MS: u64 = 10_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaptureState {
     /// Waiting for keys; `held` shows the keys currently down.
-    Capturing { held: Vec<String>, message: Option<String> },
-    Done { keys: Vec<String>, warning: Option<String> },
+    Capturing {
+        held: Vec<String>,
+        message: Option<String>,
+    },
+    Done {
+        keys: Vec<String>,
+        warning: Option<String>,
+    },
     Cancelled(CancelReason),
 }
 
@@ -29,7 +35,13 @@ pub struct Capture {
 
 impl Capture {
     pub fn start(now_ms: u64) -> Self {
-        Capture { started_ms: now_ms, held: vec![], peak: vec![], message: None, result: None }
+        Capture {
+            started_ms: now_ms,
+            held: vec![],
+            peak: vec![],
+            message: None,
+            result: None,
+        }
     }
 
     pub fn state(&self) -> CaptureState {
@@ -47,7 +59,9 @@ impl Capture {
         if self.result.is_some() {
             return self.state();
         }
-        let Some(name) = name_for_vk(vk) else { return self.state() };
+        let Some(name) = name_for_vk(vk) else {
+            return self.state();
+        };
         if name == "Escape" && self.held.is_empty() {
             self.result = Some(CaptureState::Cancelled(CancelReason::Escape));
             return self.state();
@@ -66,7 +80,9 @@ impl Capture {
         if self.result.is_some() {
             return self.state();
         }
-        let Some(name) = name_for_vk(vk) else { return self.state() };
+        let Some(name) = name_for_vk(vk) else {
+            return self.state();
+        };
         self.held.retain(|k| *k != name);
         if self.held.is_empty() && !self.peak.is_empty() {
             let keys = canonical(&self.peak);
@@ -76,8 +92,18 @@ impl Capture {
                     self.message = Some(why);
                     self.started_ms = now_ms; // capture continues with a fresh timeout
                 }
-                Verdict::Accept => self.result = Some(CaptureState::Done { keys, warning: None }),
-                Verdict::Warn(w) => self.result = Some(CaptureState::Done { keys, warning: Some(w) }),
+                Verdict::Accept => {
+                    self.result = Some(CaptureState::Done {
+                        keys,
+                        warning: None,
+                    })
+                }
+                Verdict::Warn(w) => {
+                    self.result = Some(CaptureState::Done {
+                        keys,
+                        warning: Some(w),
+                    })
+                }
             }
         }
         self.state()
@@ -112,7 +138,13 @@ mod tests {
     fn single_key_is_recorded_on_release() {
         let mut c = Capture::start(0);
         assert!(matches!(c.key_down(RCTRL), CaptureState::Capturing { .. }));
-        assert_eq!(c.key_up(RCTRL, 300), CaptureState::Done { keys: s(&["RightCtrl"]), warning: None });
+        assert_eq!(
+            c.key_up(RCTRL, 300),
+            CaptureState::Done {
+                keys: s(&["RightCtrl"]),
+                warning: None
+            }
+        );
     }
     #[test]
     fn combination_is_the_peak_set_even_if_released_in_any_order() {
@@ -120,38 +152,61 @@ mod tests {
         c.key_down(LCTRL);
         c.key_down(Q);
         c.key_up(LCTRL, 100);
-        assert_eq!(c.key_up(Q, 120), CaptureState::Done { keys: s(&["LeftCtrl", "Q"]), warning: None });
+        assert_eq!(
+            c.key_up(Q, 120),
+            CaptureState::Done {
+                keys: s(&["LeftCtrl", "Q"]),
+                warning: None
+            }
+        );
     }
     #[test]
     fn rejected_key_shows_reason_and_capture_continues() {
         let mut c = Capture::start(0);
         c.key_down(A);
         match c.key_up(A, 50) {
-            CaptureState::Capturing { message: Some(m), .. } => assert!(m.contains("typing")),
+            CaptureState::Capturing {
+                message: Some(m), ..
+            } => assert!(m.contains("typing")),
             o => panic!("{o:?}"),
         }
         c.key_down(RCTRL);
-        assert_eq!(c.key_up(RCTRL, 90), CaptureState::Done { keys: s(&["RightCtrl"]), warning: None });
+        assert_eq!(
+            c.key_up(RCTRL, 90),
+            CaptureState::Done {
+                keys: s(&["RightCtrl"]),
+                warning: None
+            }
+        );
     }
     #[test]
     fn warned_key_is_accepted_with_the_warning() {
         let mut c = Capture::start(0);
         c.key_down(0xA5);
         match c.key_up(0xA5, 10) {
-            CaptureState::Done { warning: Some(_), keys } => assert_eq!(keys, s(&["RightAlt"])),
+            CaptureState::Done {
+                warning: Some(_),
+                keys,
+            } => assert_eq!(keys, s(&["RightAlt"])),
             o => panic!("{o:?}"),
         }
     }
     #[test]
     fn escape_cancels() {
         let mut c = Capture::start(0);
-        assert_eq!(c.key_down(ESC), CaptureState::Cancelled(CancelReason::Escape));
+        assert_eq!(
+            c.key_down(ESC),
+            CaptureState::Cancelled(CancelReason::Escape)
+        );
     }
     #[test]
     fn ten_seconds_without_a_binding_cancels() {
         let mut c = Capture::start(1000);
         assert!(matches!(c.tick(10_999), CaptureState::Capturing { .. }));
-        assert_eq!(c.tick(11_000), CaptureState::Cancelled(CancelReason::Timeout));
+        assert_eq!(
+            c.tick(11_000),
+            CaptureState::Cancelled(CancelReason::Timeout)
+        );
     }
     #[test]
     fn rejection_restarts_the_timeout() {
@@ -159,12 +214,18 @@ mod tests {
         c.key_down(A);
         c.key_up(A, 9_000);
         assert!(matches!(c.tick(18_000), CaptureState::Capturing { .. }));
-        assert_eq!(c.tick(19_000), CaptureState::Cancelled(CancelReason::Timeout));
+        assert_eq!(
+            c.tick(19_000),
+            CaptureState::Cancelled(CancelReason::Timeout)
+        );
     }
     #[test]
     fn finished_capture_ignores_later_keys() {
         let mut c = Capture::start(0);
         c.key_down(ESC);
-        assert_eq!(c.key_down(RCTRL), CaptureState::Cancelled(CancelReason::Escape));
+        assert_eq!(
+            c.key_down(RCTRL),
+            CaptureState::Cancelled(CancelReason::Escape)
+        );
     }
 }

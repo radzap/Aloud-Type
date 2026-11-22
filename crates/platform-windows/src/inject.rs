@@ -82,8 +82,14 @@ pub fn encode(batch: &str) -> Vec<KeyEv> {
     let mut ev = Vec::new();
     for ch in batch.chars() {
         if ch == '\n' {
-            ev.push(KeyEv { key: Key::Return, up: false });
-            ev.push(KeyEv { key: Key::Return, up: true });
+            ev.push(KeyEv {
+                key: Key::Return,
+                up: false,
+            });
+            ev.push(KeyEv {
+                key: Key::Return,
+                up: true,
+            });
             continue;
         }
         if ch == '\r' {
@@ -91,8 +97,14 @@ pub fn encode(batch: &str) -> Vec<KeyEv> {
         }
         let mut buf = [0u16; 2];
         for &u in ch.encode_utf16(&mut buf).iter() {
-            ev.push(KeyEv { key: Key::Unit(u), up: false });
-            ev.push(KeyEv { key: Key::Unit(u), up: true });
+            ev.push(KeyEv {
+                key: Key::Unit(u),
+                up: false,
+            });
+            ev.push(KeyEv {
+                key: Key::Unit(u),
+                up: true,
+            });
         }
     }
     ev
@@ -144,7 +156,13 @@ pub struct InjectingSink<B: InputBackend> {
 impl<B: InputBackend> InjectingSink<B> {
     pub fn new(backend: B) -> (Self, FaultSlot) {
         let fault: FaultSlot = Arc::default();
-        (Self { injector: TextInjector::new(backend), fault: fault.clone() }, fault)
+        (
+            Self {
+                injector: TextInjector::new(backend),
+                fault: fault.clone(),
+            },
+            fault,
+        )
     }
 }
 
@@ -179,7 +197,13 @@ mod tests {
             .iter()
             .flatten()
             .filter(|e| !e.up)
-            .filter_map(|e| if let Key::Unit(u) = e.key { Some(u) } else { None })
+            .filter_map(|e| {
+                if let Key::Unit(u) = e.key {
+                    Some(u)
+                } else {
+                    None
+                }
+            })
             .collect()
     }
 
@@ -207,8 +231,20 @@ mod tests {
         let want = [0x61u16, 0xD83D, 0xDE00];
         assert_eq!(ev.len(), 6);
         for (i, u) in want.iter().enumerate() {
-            assert_eq!(ev[2 * i], KeyEv { key: Key::Unit(*u), up: false });
-            assert_eq!(ev[2 * i + 1], KeyEv { key: Key::Unit(*u), up: true });
+            assert_eq!(
+                ev[2 * i],
+                KeyEv {
+                    key: Key::Unit(*u),
+                    up: false
+                }
+            );
+            assert_eq!(
+                ev[2 * i + 1],
+                KeyEv {
+                    key: Key::Unit(*u),
+                    up: true
+                }
+            );
         }
     }
 
@@ -224,7 +260,8 @@ mod tests {
     #[test]
     fn a_surrogate_pair_is_never_split_across_calls() {
         let mut inj = TextInjector::new(Fake::default());
-        inj.type_text(&format!("x{}y {}", "\u{1F600}".repeat(30), "\u{1F680}")).unwrap();
+        inj.type_text(&format!("x{}y {}", "\u{1F600}".repeat(30), "\u{1F680}"))
+            .unwrap();
         for c in &inj.backend.calls {
             let u = units(std::slice::from_ref(c));
             assert!(String::from_utf16(&u).is_ok(), "call split a pair");
@@ -234,20 +271,32 @@ mod tests {
     #[test]
     fn newline_becomes_enter_and_cr_is_dropped() {
         let ev = encode("a\r\nb");
-        assert_eq!(ev[2], KeyEv { key: Key::Return, up: false });
+        assert_eq!(
+            ev[2],
+            KeyEv {
+                key: Key::Return,
+                up: false
+            }
+        );
         assert_eq!(ev.len(), 6);
     }
 
     #[test]
     fn short_send_is_a_rejection_and_stops_typing() {
-        let mut inj = TextInjector::new(Fake { accept: Some(3), ..Default::default() });
+        let mut inj = TextInjector::new(Fake {
+            accept: Some(3),
+            ..Default::default()
+        });
         assert_eq!(inj.type_text("hello world"), Err(TypingFault::Rejected));
         assert_eq!(inj.backend.calls.len(), 1);
     }
 
     #[test]
     fn zero_accepted_is_a_rejection() {
-        let mut inj = TextInjector::new(Fake { accept: Some(0), ..Default::default() });
+        let mut inj = TextInjector::new(Fake {
+            accept: Some(0),
+            ..Default::default()
+        });
         assert_eq!(inj.type_text("a"), Err(TypingFault::Rejected));
     }
 
@@ -260,15 +309,27 @@ mod tests {
 
     #[test]
     fn elevated_foreground_refuses_to_start_with_the_amber_message() {
-        assert_eq!(check_can_start(&mut Probe(true)), Err(TypingFault::Elevated));
-        assert_eq!(TypingFault::Elevated.message(), "Can't type into an administrator window");
+        assert_eq!(
+            check_can_start(&mut Probe(true)),
+            Err(TypingFault::Elevated)
+        );
+        assert_eq!(
+            TypingFault::Elevated.message(),
+            "Can't type into an administrator window"
+        );
         assert_eq!(check_can_start(&mut Probe(false)), Ok(()));
-        assert_eq!(TypingFault::Rejected.message(), "Couldn't type into this window");
+        assert_eq!(
+            TypingFault::Rejected.message(),
+            "Couldn't type into this window"
+        );
     }
 
     #[test]
     fn sink_records_the_fault_and_types_nothing_afterwards() {
-        let (mut sink, slot) = InjectingSink::new(Fake { accept: Some(1), ..Default::default() });
+        let (mut sink, slot) = InjectingSink::new(Fake {
+            accept: Some(1),
+            ..Default::default()
+        });
         sink.type_text("one");
         assert_eq!(*slot.lock().unwrap(), Some(TypingFault::Rejected));
         sink.type_text("two");
@@ -281,6 +342,9 @@ mod tests {
         sink.type_text("hello");
         sink.type_text(" world");
         assert!(slot.lock().unwrap().is_none());
-        assert_eq!(String::from_utf16(&units(&sink.injector.backend.calls)).unwrap(), "hello world");
+        assert_eq!(
+            String::from_utf16(&units(&sink.injector.backend.calls)).unwrap(),
+            "hello world"
+        );
     }
 }

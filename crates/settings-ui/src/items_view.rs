@@ -5,7 +5,8 @@ use crate::items::{
     ItemsSession, LoginItem, MicLister, MicOption, LANGUAGES, RELEASES_URL, SOURCE_URL, VERSION,
 };
 use aloud_type_config::{
-    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State, VerticalPosition,
+    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State,
+    VerticalPosition,
 };
 use iced::widget::{button, column, pick_list, row, text, toggler};
 use iced::Element;
@@ -22,7 +23,10 @@ impl<T> fmt::Display for Choice<T> {
     }
 }
 fn choice<T>(value: T, label: &str) -> Choice<T> {
-    Choice { value, label: label.into() }
+    Choice {
+        value,
+        label: label.into(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,7 +51,10 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
     pub fn new(config: ConfigFile<Settings>, login: L, mics: M) -> Self {
         // The state file sits next to the settings file; Settings only reads it.
         let state = ConfigFile::<State>::open(config.path().with_file_name("state.toml"));
-        Self { session: ItemsSession::new(config, PipeClient::default(), login, mics).with_state(state) }
+        Self {
+            session: ItemsSession::new(config, PipeClient::default(), login, mics)
+                .with_state(state),
+        }
     }
 
     pub fn update(&mut self, m: ItemsMsg) {
@@ -67,21 +74,38 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
 
     pub fn view(&self) -> Element<'_, ItemsMsg> {
         let gpu_notice = self.session.gpu_notice();
-        let gpus: Vec<Choice<Gpu>> =
-            self.session.gpu_options().into_iter().map(|(value, label)| Choice { value, label }).collect();
-        let gpu_sel = gpus.iter().find(|c| c.value == self.session.settings().gpu).cloned();
+        let gpus: Vec<Choice<Gpu>> = self
+            .session
+            .gpu_options()
+            .into_iter()
+            .map(|(value, label)| Choice { value, label })
+            .collect();
+        let gpu_sel = gpus
+            .iter()
+            .find(|c| c.value == self.session.settings().gpu)
+            .cloned();
         let s = self.session.settings();
-        let mics: Vec<Choice<Option<String>>> =
-            self.session.mic_options().into_iter().map(|MicOption { id, label }| Choice { value: id, label }).collect();
+        let mics: Vec<Choice<Option<String>>> = self
+            .session
+            .mic_options()
+            .into_iter()
+            .map(|MicOption { id, label }| Choice { value: id, label })
+            .collect();
         let mic_sel = mics.iter().find(|c| c.value == s.microphone).cloned();
 
         let mut langs = vec![choice(Language::Auto, "Auto")];
-        langs.extend(LANGUAGES.iter().map(|(c, n)| choice(Language::Fixed((*c).into()), n)));
+        langs.extend(
+            LANGUAGES
+                .iter()
+                .map(|(c, n)| choice(Language::Fixed((*c).into()), n)),
+        );
         let lang_sel = langs.iter().find(|c| c.value == s.language).cloned();
         let lang_pick: Element<'_, ItemsMsg> = if self.session.language_enabled() {
             pick_list(langs, lang_sel, ItemsMsg::Language).into()
         } else {
-            text("English (this Speech model is English only)").size(14).into()
+            text("English (this Speech model is English only)")
+                .size(14)
+                .into()
         };
 
         let styles = vec![
@@ -89,15 +113,27 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             choice(IndicatorStyle::BarPill, "Bar pill"),
             choice(IndicatorStyle::Orb, "Orb"),
         ];
-        let style_sel = styles.iter().find(|c| c.value == s.indicator_style).cloned();
-        let verticals = vec![choice(VerticalPosition::Top, "Top"), choice(VerticalPosition::Bottom, "Bottom")];
-        let vert_sel = verticals.iter().find(|c| c.value == s.indicator_vertical).cloned();
+        let style_sel = styles
+            .iter()
+            .find(|c| c.value == s.indicator_style)
+            .cloned();
+        let verticals = vec![
+            choice(VerticalPosition::Top, "Top"),
+            choice(VerticalPosition::Bottom, "Bottom"),
+        ];
+        let vert_sel = verticals
+            .iter()
+            .find(|c| c.value == s.indicator_vertical)
+            .cloned();
         let horizontals = vec![
             choice(HorizontalPosition::Left, "Left"),
             choice(HorizontalPosition::Center, "Center"),
             choice(HorizontalPosition::Right, "Right"),
         ];
-        let horiz_sel = horizontals.iter().find(|c| c.value == s.indicator_horizontal).cloned();
+        let horiz_sel = horizontals
+            .iter()
+            .find(|c| c.value == s.indicator_horizontal)
+            .cloned();
         let memories = vec![
             choice(ModelMemory::KeepLoaded, "Keep loaded"),
             choice(ModelMemory::UnloadWhenIdle, "Unload when idle"),
@@ -119,10 +155,15 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             text("Speech model memory").size(18),
             pick_list(memories, mem_sel, ItemsMsg::Memory),
             text("GPU").size(18),
-            row![pick_list(gpus, gpu_sel, ItemsMsg::Gpu), button(text("Re-test")).on_press(ItemsMsg::RetestGpu)]
-                .spacing(8),
+            row![
+                pick_list(gpus, gpu_sel, ItemsMsg::Gpu),
+                button(text("Re-test")).on_press(ItemsMsg::RetestGpu)
+            ]
+            .spacing(8),
             text(gpu_notice.unwrap_or("")).size(14),
-            toggler(self.session.launch_at_login()).label("Launch at login").on_toggle(ItemsMsg::Login),
+            toggler(self.session.launch_at_login())
+                .label("Launch at login")
+                .on_toggle(ItemsMsg::Login),
             text(format!("Aloud Type {VERSION}")).size(14),
             row![
                 button(text("Releases")).on_press(ItemsMsg::OpenLink(RELEASES_URL)),
@@ -139,5 +180,7 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
 }
 
 fn open_link(url: &str) {
-    let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    let _ = std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
 }

@@ -21,7 +21,15 @@ fn sha(bytes: &[u8]) -> &'static str {
 }
 
 fn info(id: &'static str, file: &'static str, bytes: &[u8]) -> ModelInfo {
-    ModelInfo { id, label: id, file, url: file, size: bytes.len() as u64, sha256: sha(bytes), english_only: false }
+    ModelInfo {
+        id,
+        label: id,
+        file,
+        url: file,
+        size: bytes.len() as u64,
+        sha256: sha(bytes),
+        english_only: false,
+    }
 }
 
 /// Serves by url; records the requests.
@@ -30,7 +38,10 @@ impl Http for Fake {
     fn get(&mut self, url: &str, _from: u64) -> Result<Response, HttpError> {
         self.1.borrow_mut().push(url.to_string());
         match self.0.iter().find(|(u, _)| *u == url) {
-            Some((_, b)) => Ok(Response { resumed: false, body: Box::new(Cursor::new(b.to_vec())) }),
+            Some((_, b)) => Ok(Response {
+                resumed: false,
+                body: Box::new(Cursor::new(b.to_vec())),
+            }),
             None => Err(HttpError::Status(404)),
         }
     }
@@ -69,18 +80,36 @@ fn rig() -> Rig {
 }
 
 impl Rig {
-    fn run(&mut self, work: BackgroundWork, http: &mut Fake) -> aloud_type_settings_ui::background::Report {
+    fn run(
+        &mut self,
+        work: BackgroundWork,
+        http: &mut Fake,
+    ) -> aloud_type_settings_ui::background::Report {
         let mut link = ResidentLink::new(self.pipe.clone());
-        run(work, self.dir.path(), (&self.vad, &self.small), (&mut self.settings, &mut self.state), http, &mut link)
+        run(
+            work,
+            self.dir.path(),
+            (&self.vad, &self.small),
+            (&mut self.settings, &mut self.state),
+            http,
+            &mut link,
+        )
     }
     fn fake(&self) -> Fake {
-        Fake(vec![("vad.bin", VAD_BYTES), ("small.bin", SMALL_BYTES)], Rc::default())
+        Fake(
+            vec![("vad.bin", VAD_BYTES), ("small.bin", SMALL_BYTES)],
+            Rc::default(),
+        )
     }
     fn saved_settings(&self) -> Settings {
-        ConfigFile::<Settings>::open(self.dir.path().join("settings.toml")).value().clone()
+        ConfigFile::<Settings>::open(self.dir.path().join("settings.toml"))
+            .value()
+            .clone()
     }
     fn saved_state(&self) -> State {
-        ConfigFile::<State>::open(self.dir.path().join("state.toml")).value().clone()
+        ConfigFile::<State>::open(self.dir.path().join("state.toml"))
+            .value()
+            .clone()
     }
 }
 
@@ -92,7 +121,13 @@ fn exists(dir: &Path, m: &ModelInfo) -> bool {
 fn the_voice_model_is_downloaded_and_verified_without_touching_settings() {
     let mut r = rig();
     let mut http = r.fake();
-    let rep = r.run(BackgroundWork { vad: true, small_default: false }, &mut http);
+    let rep = r.run(
+        BackgroundWork {
+            vad: true,
+            small_default: false,
+        },
+        &mut http,
+    );
     assert_eq!(rep.vad, Some(Ok(())));
     assert!(exists(r.dir.path(), &r.vad));
     assert!(!rep.switched && r.pipe.0.borrow().is_empty());
@@ -103,7 +138,13 @@ fn the_voice_model_is_downloaded_and_verified_without_touching_settings() {
 fn small_becomes_the_default_and_the_resident_process_is_told() {
     let mut r = rig();
     let mut http = r.fake();
-    let rep = r.run(BackgroundWork { vad: false, small_default: true }, &mut http);
+    let rep = r.run(
+        BackgroundWork {
+            vad: false,
+            small_default: true,
+        },
+        &mut http,
+    );
     assert_eq!(rep.small, Some(Ok(())));
     assert!(rep.switched);
     assert!(exists(r.dir.path(), &r.small));
@@ -115,9 +156,17 @@ fn small_becomes_the_default_and_the_resident_process_is_told() {
 #[test]
 fn a_model_the_user_chose_meanwhile_is_not_overridden() {
     let mut r = rig();
-    r.settings.update(|s| s.speech_model = "base.en-q5_1".into()).unwrap();
+    r.settings
+        .update(|s| s.speech_model = "base.en-q5_1".into())
+        .unwrap();
     let mut http = r.fake();
-    let rep = r.run(BackgroundWork { vad: false, small_default: true }, &mut http);
+    let rep = r.run(
+        BackgroundWork {
+            vad: false,
+            small_default: true,
+        },
+        &mut http,
+    );
     assert!(!rep.switched);
     assert_eq!(r.saved_settings().speech_model, "base.en-q5_1");
 }
@@ -126,7 +175,13 @@ fn a_model_the_user_chose_meanwhile_is_not_overridden() {
 fn a_failed_download_is_not_retried_at_every_start() {
     let mut r = rig();
     let mut http = Fake(vec![], Rc::default());
-    let rep = r.run(BackgroundWork { vad: false, small_default: true }, &mut http);
+    let rep = r.run(
+        BackgroundWork {
+            vad: false,
+            small_default: true,
+        },
+        &mut http,
+    );
     assert!(matches!(rep.small, Some(Err(_))));
     assert!(!rep.switched);
     assert!(r.saved_state().small_upgrade_started);

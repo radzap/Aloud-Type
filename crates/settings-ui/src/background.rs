@@ -5,7 +5,9 @@
 use crate::download::{download_model, DownloadError, Http, UreqHttp};
 use crate::ipc::{Command, PipeClient, ResidentLink, Transport};
 use aloud_type_config::{AppPaths, ConfigFile, Language, Settings, State, DEFAULT_SPEECH_MODEL};
-use aloud_type_models::{background_work, find, BackgroundWork, ModelInfo, GPU_DEFAULT_MODEL, VAD_MODEL};
+use aloud_type_models::{
+    background_work, find, BackgroundWork, ModelInfo, GPU_DEFAULT_MODEL, VAD_MODEL,
+};
 use std::path::Path;
 
 /// Command-line flag that selects this mode.
@@ -61,7 +63,9 @@ pub fn run<T: Transport>(
 
 /// The real thing: reads the user's files, uses the network and the pipe.
 pub fn run_default() -> i32 {
-    let Some(paths) = AppPaths::from_env() else { return 1 };
+    let Some(paths) = AppPaths::from_env() else {
+        return 1;
+    };
     let mut settings = ConfigFile::<Settings>::open(paths.settings_file());
     let mut state = ConfigFile::<State>::open(paths.state_file());
     let dir = paths.models_dir();
@@ -71,6 +75,13 @@ pub fn run_default() -> i32 {
     }
     let small = find(GPU_DEFAULT_MODEL).expect("small model is in the catalog");
     let mut link = ResidentLink::new(PipeClient::default());
-    let r = run(work, &dir, (&VAD_MODEL, small), (&mut settings, &mut state), &mut UreqHttp::default(), &mut link);
+    let r = run(
+        work,
+        &dir,
+        (&VAD_MODEL, small),
+        (&mut settings, &mut state),
+        &mut UreqHttp::default(),
+        &mut link,
+    );
     i32::from(r.vad.is_some_and(|v| v.is_err()) || r.small.is_some_and(|v| v.is_err()))
 }

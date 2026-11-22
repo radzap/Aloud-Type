@@ -90,11 +90,14 @@ impl Residency {
                     Ok(m) => st.staged = Some((id, m)),
                     Err(e) => {
                         if let Some((cur, _)) = &st.model {
-                            let msg = format!("Could not load Speech model \"{id}\" ({e}); keeping \"{cur}\"");
+                            let msg = format!(
+                                "Could not load Speech model \"{id}\" ({e}); keeping \"{cur}\""
+                            );
                             st.notices.push(msg);
                         } else {
                             st.load_failed = true;
-                            st.notices.push(format!("Could not load Speech model \"{id}\": {e}"));
+                            st.notices
+                                .push(format!("Could not load Speech model \"{id}\": {e}"));
                         }
                     }
                 }
@@ -262,7 +265,11 @@ mod tests {
     struct Named(String);
     impl Recognizer for Named {
         fn recognize(&mut self, _: &[f32], _: &str, _: Option<&str>) -> Vec<Segment> {
-            vec![Segment { text: self.0.clone(), words: vec![], no_speech_prob: 0.0 }]
+            vec![Segment {
+                text: self.0.clone(),
+                words: vec![],
+                no_speech_prob: 0.0,
+            }]
         }
     }
 
@@ -290,7 +297,12 @@ mod tests {
 
     impl Rig {
         fn new() -> Self {
-            Rig { clock: Default::default(), loads: Default::default(), gates: Default::default(), failing: Default::default() }
+            Rig {
+                clock: Default::default(),
+                loads: Default::default(),
+                gates: Default::default(),
+                failing: Default::default(),
+            }
         }
         fn hold(&self, id: &str) -> Gate {
             let g = Gate::default();
@@ -298,7 +310,8 @@ mod tests {
             g
         }
         fn loader(&self) -> Loader {
-            let (loads, gates, failing) = (self.loads.clone(), self.gates.clone(), self.failing.clone());
+            let (loads, gates, failing) =
+                (self.loads.clone(), self.gates.clone(), self.failing.clone());
             Arc::new(move |id| {
                 loads.lock().unwrap().push(id.to_string());
                 let gate = gates.lock().unwrap().get(id).cloned();
@@ -313,7 +326,12 @@ mod tests {
         }
         fn residency(&self, id: &str, memory: ModelMemory) -> Residency {
             let c = self.clock.clone();
-            Residency::start(self.loader(), Arc::new(move || c.load(Ordering::SeqCst)), id, memory)
+            Residency::start(
+                self.loader(),
+                Arc::new(move || c.load(Ordering::SeqCst)),
+                id,
+                memory,
+            )
         }
         fn advance(&self, ms: u64) {
             self.clock.fetch_add(ms, Ordering::SeqCst);
@@ -326,7 +344,10 @@ mod tests {
     fn eventually(mut f: impl FnMut() -> bool) {
         let t = Instant::now();
         while !f() {
-            assert!(t.elapsed() < Duration::from_secs(5), "condition not reached");
+            assert!(
+                t.elapsed() < Duration::from_secs(5),
+                "condition not reached"
+            );
             std::thread::sleep(Duration::from_millis(2));
         }
     }
@@ -345,7 +366,10 @@ mod tests {
         let (d, r2) = (done.clone(), r.clone());
         let t = std::thread::spawn(move || *d.lock().unwrap() = Some(said(&r2)));
         std::thread::sleep(Duration::from_millis(50));
-        assert!(done.lock().unwrap().is_none(), "must wait, not skip, while the model loads");
+        assert!(
+            done.lock().unwrap().is_none(),
+            "must wait, not skip, while the model loads"
+        );
         gate.open();
         t.join().unwrap();
         assert_eq!(done.lock().unwrap().as_deref(), Some("base"));
@@ -493,7 +517,11 @@ mod tests {
         rig.advance(IDLE_UNLOAD_MS);
         r.tick();
         r.request_model("small");
-        assert_eq!(rig.load_count(), 1, "nothing is loaded just to swap an unloaded model");
+        assert_eq!(
+            rig.load_count(),
+            1,
+            "nothing is loaded just to swap an unloaded model"
+        );
         r.dictation_started();
         assert_eq!(said(&r), "small");
     }

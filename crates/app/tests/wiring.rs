@@ -47,25 +47,39 @@ impl Targets for Log {
     }
 }
 
-type Rig = (SettingsHost<Log>, Log, Rc<RefCell<Settings>>, Rc<RefCell<Option<String>>>);
+type Rig = (
+    SettingsHost<Log>,
+    Log,
+    Rc<RefCell<Settings>>,
+    Rc<RefCell<Option<String>>>,
+);
 
 fn host(initial: Settings) -> Rig {
     let log = Log::default();
     let cur = Rc::new(RefCell::new(initial));
     let notice = Rc::new(RefCell::new(None));
     let (c, n) = (cur.clone(), notice.clone());
-    let source = Box::new(move || Loaded { settings: c.borrow().clone(), notice: n.borrow_mut().take() });
+    let source = Box::new(move || Loaded {
+        settings: c.borrow().clone(),
+        notice: n.borrow_mut().take(),
+    });
     (SettingsHost::new(log.clone(), source), log, cur, notice)
 }
 
 #[test]
 fn first_reload_applies_everything_including_the_configured_key_not_a_fixed_one() {
-    let s = Settings { dictation_key: vec!["F9".into()], ..Settings::default() };
+    let s = Settings {
+        dictation_key: vec!["F9".into()],
+        ..Settings::default()
+    };
     let (mut h, log, _, _) = host(s);
     h.reload();
     let l = log.take();
     assert!(l.contains(&"keys [120]".to_string()), "{l:?}"); // F9 = 0x78
-    assert!(l.contains(&"life 250 false".to_string()), "F9 is not a modifier: no chord rule");
+    assert!(
+        l.contains(&"life 250 false".to_string()),
+        "F9 is not a modifier: no chord rule"
+    );
     assert!(l.contains(&"style trace-strip".to_string()));
     assert!(l.contains(&"place bottom center".to_string()));
     assert!(l.contains(&"model base-q5_1".to_string()));
@@ -96,10 +110,16 @@ fn reload_applies_only_what_changed_without_restart() {
         s.language = Language::Auto;
     }
     h.on_command(Command::ReloadSettings);
-    assert_eq!(log.take(), vec!["style orb", "place bottom left", "memory unload-when-idle"]);
+    assert_eq!(
+        log.take(),
+        vec!["style orb", "place bottom left", "memory unload-when-idle"]
+    );
     let d = h.dictation_settings();
     assert_eq!(d.borrow().language, "auto");
-    assert_eq!(d.borrow().microphone, aloud_type_app::Mic::Specific("Headset".into()));
+    assert_eq!(
+        d.borrow().microphone,
+        aloud_type_app::Mic::Specific("Headset".into())
+    );
 }
 
 #[test]
@@ -132,7 +152,10 @@ fn suspend_resume_and_retest_commands_reach_their_targets() {
     h.on_command(Command::SuspendKeys);
     h.on_command(Command::ResumeKeys);
     h.on_command(Command::RetestGpu);
-    assert_eq!(log.take(), vec!["suspended true", "suspended false", "retest"]);
+    assert_eq!(
+        log.take(),
+        vec!["suspended true", "suspended false", "retest"]
+    );
 }
 
 #[test]
@@ -192,7 +215,10 @@ fn a_spent_restart_budget_shows_the_fault_and_a_restart_only_drops_the_dictation
         settings: Box::new(DictationSettings::default),
         config: ControllerConfig::default(),
     });
-    assert!(!handle_report(&mut c, Report::Restarted(Worker::Recognizer)));
+    assert!(!handle_report(
+        &mut c,
+        Report::Restarted(Worker::Recognizer)
+    ));
     assert_eq!(c.tray(), Tray::Idle);
     let f = WorkerFault::for_worker(Worker::Audio);
     assert!(handle_report(&mut c, Report::Faulted(Worker::Audio, f)));
@@ -203,7 +229,10 @@ fn a_spent_restart_budget_shows_the_fault_and_a_restart_only_drops_the_dictation
 #[test]
 fn the_settings_window_is_the_sibling_executable() {
     let p = settings_exe_beside(std::path::Path::new("C:/Apps/AloudType/aloud-type.exe"));
-    assert_eq!(p, std::path::PathBuf::from("C:/Apps/AloudType/aloud-type-settings-ui.exe"));
+    assert_eq!(
+        p,
+        std::path::PathBuf::from("C:/Apps/AloudType/aloud-type-settings-ui.exe")
+    );
 }
 
 #[derive(Default)]
@@ -217,7 +246,10 @@ impl BackgroundSpawner for CountingSpawner {
 fn dir_with_base_installed() -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
     let m = aloud_type_models::find(aloud_type_models::FIRST_RUN_MODEL).unwrap();
-    std::fs::File::create(aloud_type_models::model_path(d.path(), m)).unwrap().set_len(m.size).unwrap();
+    std::fs::File::create(aloud_type_models::model_path(d.path(), m))
+        .unwrap()
+        .set_len(m.size)
+        .unwrap();
     d
 }
 
@@ -243,7 +275,10 @@ fn nothing_is_spawned_before_first_run_or_when_nothing_is_due() {
     assert_eq!(sp.0, 0, "setup is incomplete");
     let d = dir_with_base_installed();
     let vad = &aloud_type_models::VAD_MODEL;
-    std::fs::File::create(aloud_type_models::model_path(d.path(), vad)).unwrap().set_len(vad.size).unwrap();
+    std::fs::File::create(aloud_type_models::model_path(d.path(), vad))
+        .unwrap()
+        .set_len(vad.size)
+        .unwrap();
     bg.check(&s, &st, d.path(), &mut sp);
     assert_eq!(sp.0, 0, "voice model present and no confirmed GPU");
 }

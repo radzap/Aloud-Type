@@ -66,13 +66,19 @@ pub fn vk_for_code_name(name: &str) -> Option<u32> {
 
 /// "RightCtrl" -> "Right Ctrl"; a combination reads "Left Ctrl + Q".
 pub fn display_binding(keys: &[String]) -> String {
-    keys.iter().map(|k| split_camel(k)).collect::<Vec<_>>().join(" + ")
+    keys.iter()
+        .map(|k| split_camel(k))
+        .collect::<Vec<_>>()
+        .join(" + ")
 }
 
 fn split_camel(s: &str) -> String {
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && c.is_ascii_uppercase() && !s.chars().nth(i - 1).is_some_and(|p| p.is_ascii_uppercase()) {
+        if i > 0
+            && c.is_ascii_uppercase()
+            && !s.chars().nth(i - 1).is_some_and(|p| p.is_ascii_uppercase())
+        {
             out.push(' ');
         }
         out.push(c);

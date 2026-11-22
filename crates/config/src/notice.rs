@@ -2,7 +2,8 @@
 //! the last good settings stay in force.
 use crate::LoadStatus;
 
-pub const INVALID_SETTINGS_NOTICE: &str = "Settings file is invalid. Using your last good settings.";
+pub const INVALID_SETTINGS_NOTICE: &str =
+    "Settings file is invalid. Using your last good settings.";
 
 #[derive(Debug, Default)]
 pub struct SettingsNotice {

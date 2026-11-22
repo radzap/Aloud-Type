@@ -110,7 +110,20 @@ impl PowerWatcher {
             };
             RegisterClassW(&wc);
             // Top-level (not message-only) so it receives broadcasts.
-            let h = CreateWindowExW(0x80, name.as_ptr(), std::ptr::null(), 0, 0, 0, 0, 0, 0, 0, inst, std::ptr::null());
+            let h = CreateWindowExW(
+                0x80,
+                name.as_ptr(),
+                std::ptr::null(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                inst,
+                std::ptr::null(),
+            );
             let _ = ready_tx.send(h);
             if h == 0 {
                 return;
@@ -151,7 +164,13 @@ mod tests {
         let w = PowerWatcher::start().unwrap();
         w.simulate(PBT_APMSUSPEND);
         w.simulate(PBT_APMRESUMEAUTOMATIC);
-        assert_eq!(w.events.recv_timeout(Duration::from_secs(2)), Ok(PowerEvent::Suspend));
-        assert_eq!(w.events.recv_timeout(Duration::from_secs(2)), Ok(PowerEvent::Resume));
+        assert_eq!(
+            w.events.recv_timeout(Duration::from_secs(2)),
+            Ok(PowerEvent::Suspend)
+        );
+        assert_eq!(
+            w.events.recv_timeout(Duration::from_secs(2)),
+            Ok(PowerEvent::Resume)
+        );
     }
 }

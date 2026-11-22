@@ -2,9 +2,9 @@
 //! Run: cargo run -p aloud-type-platform-windows --example inject_console
 //! Focus Notepad / a browser field / a chat app (or an admin window to see the
 //! elevated refusal) during the countdown.
+use aloud_type_core::streaming::TextSink;
 use aloud_type_platform_windows::inject::{check_can_start, InjectingSink};
 use aloud_type_platform_windows::inject_win::{ForegroundElevation, SendInputBackend};
-use aloud_type_core::streaming::TextSink;
 use std::time::Duration;
 
 fn main() {
@@ -15,7 +15,15 @@ fn main() {
         return;
     }
     let (mut sink, fault) = InjectingSink::new(SendInputBackend);
-    for w in ["Hello", " world,", " na\u{ef}ve", " caf\u{e9}", " \u{65e5}\u{672c}\u{8a9e}", " \u{1F600}\u{1F680}", " done."] {
+    for w in [
+        "Hello",
+        " world,",
+        " na\u{ef}ve",
+        " caf\u{e9}",
+        " \u{65e5}\u{672c}\u{8a9e}",
+        " \u{1F600}\u{1F680}",
+        " done.",
+    ] {
         sink.type_text(w);
     }
     let f = *fault.lock().unwrap();

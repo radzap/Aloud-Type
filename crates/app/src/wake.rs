@@ -56,7 +56,10 @@ mod tests {
         let w = Wake::new();
         w.notify();
         assert!(w.wait(None));
-        assert!(!w.wait(Some(Duration::from_millis(5))), "consumed: the next wait times out");
+        assert!(
+            !w.wait(Some(Duration::from_millis(5))),
+            "consumed: the next wait times out"
+        );
     }
 
     #[test]

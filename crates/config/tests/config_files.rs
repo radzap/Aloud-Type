@@ -49,7 +49,10 @@ fn settings_round_trip_through_a_new_open() {
     assert_eq!(*g.value(), expected);
     let text = std::fs::read_to_string(&p).unwrap();
     assert!(text.contains("version = 1"));
-    assert!(!text.contains("tap_threshold_ms"), "hidden value is not written unless set");
+    assert!(
+        !text.contains("tap_threshold_ms"),
+        "hidden value is not written unless set"
+    );
 }
 
 #[test]
@@ -106,7 +109,13 @@ fn older_file_migrates_forward_on_read() {
             }
         }
         fn read(doc: &DocumentMut) -> Result<Self, String> {
-            Ok(Toy { color: doc.get("color").and_then(|v| v.as_str()).unwrap_or("").into() })
+            Ok(Toy {
+                color: doc
+                    .get("color")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .into(),
+            })
         }
         fn write(&self, doc: &mut DocumentMut) {
             doc["color"] = toml_edit::value(self.color.as_str());
@@ -120,7 +129,11 @@ fn older_file_migrates_forward_on_read() {
     assert_eq!(f.value().color, "red");
     f.update(|t| t.color = "blue".into()).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
-    assert!(text.contains("version = 2") && text.contains("color = \"blue\"") && text.contains("other = 1"));
+    assert!(
+        text.contains("version = 2")
+            && text.contains("color = \"blue\"")
+            && text.contains("other = 1")
+    );
     assert!(!text.contains("colour"));
 }
 
@@ -138,8 +151,13 @@ fn invalid_file_keeps_the_last_good_settings() {
     let d = dir();
     let p = d.path().join("settings.toml");
     let mut f = ConfigFile::<Settings>::open(&p);
-    f.update(|s| s.indicator_style = IndicatorStyle::Orb).unwrap();
-    for bad in ["this is = = not toml", "indicator_style = \"blob\"\n", "launch_at_login = \"yes\"\n"] {
+    f.update(|s| s.indicator_style = IndicatorStyle::Orb)
+        .unwrap();
+    for bad in [
+        "this is = = not toml",
+        "indicator_style = \"blob\"\n",
+        "launch_at_login = \"yes\"\n",
+    ] {
         std::fs::write(&p, bad).unwrap();
         assert!(matches!(f.reload(), LoadStatus::Invalid(_)), "{bad}");
         assert_eq!(f.value().indicator_style, IndicatorStyle::Orb);
@@ -158,8 +176,14 @@ fn invalid_file_at_startup_uses_defaults_and_is_backed_up_before_save() {
     assert!(matches!(f.status(), LoadStatus::Invalid(_)));
     assert_eq!(*f.value(), Settings::default());
     f.update(|s| s.launch_at_login = true).unwrap();
-    assert_eq!(std::fs::read_to_string(d.path().join("settings.toml.invalid.bak")).unwrap(), "oops = = =");
-    assert_eq!(*ConfigFile::<Settings>::open(&p).status(), LoadStatus::Loaded);
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("settings.toml.invalid.bak")).unwrap(),
+        "oops = = ="
+    );
+    assert_eq!(
+        *ConfigFile::<Settings>::open(&p).status(),
+        LoadStatus::Loaded
+    );
 }
 
 /// Fs that fails at a chosen step, leaving a truncated temp file like a crash would.
@@ -204,17 +228,31 @@ fn interrupted_writes_leave_the_previous_file_intact() {
     for fail_on_rename in [false, true] {
         let d = dir();
         let p = d.path().join("settings.toml");
-        ConfigFile::<Settings>::open(&p).update(|s| s.launch_at_login = true).unwrap();
+        ConfigFile::<Settings>::open(&p)
+            .update(|s| s.launch_at_login = true)
+            .unwrap();
         let before = std::fs::read_to_string(&p).unwrap();
         let mut f = ConfigFile::<Settings, _>::open_with(
-            Interrupting { fail_on_rename, renames: Cell::new(0) },
+            Interrupting {
+                fail_on_rename,
+                renames: Cell::new(0),
+            },
             &p,
         );
         assert!(f.update(|s| s.launch_at_login = false).is_err());
         assert_eq!(std::fs::read_to_string(&p).unwrap(), before);
-        assert!(f.value().launch_at_login, "in-memory value unchanged after failure");
-        assert!(!d.path().join("settings.toml.tmp").exists(), "temp file cleaned up");
-        assert_eq!(*ConfigFile::<Settings>::open(&p).status(), LoadStatus::Loaded);
+        assert!(
+            f.value().launch_at_login,
+            "in-memory value unchanged after failure"
+        );
+        assert!(
+            !d.path().join("settings.toml.tmp").exists(),
+            "temp file cleaned up"
+        );
+        assert_eq!(
+            *ConfigFile::<Settings>::open(&p).status(),
+            LoadStatus::Loaded
+        );
     }
 }
 
@@ -227,18 +265,40 @@ fn state_round_trips_and_updates_merge_with_other_writers() {
     assert!(!probe_proc.value().first_run_complete);
     probe_proc
         .update(|s| {
-            s.gpu_probes.insert("RTX 4060|551.23".into(), GpuProbe { approved: true, speedup: 2.5 });
+            s.gpu_probes.insert(
+                "RTX 4060|551.23".into(),
+                GpuProbe {
+                    approved: true,
+                    speedup: 2.5,
+                },
+            );
         })
         .unwrap();
     // A second writer holding a stale view must not lose the first writer's value.
-    settings_proc.update(|s| s.first_run_complete = true).unwrap();
-    settings_proc.update(|s| { s.downloads.insert("small-q5_1".into(), 1234); }).unwrap();
+    settings_proc
+        .update(|s| s.first_run_complete = true)
+        .unwrap();
+    settings_proc
+        .update(|s| {
+            s.downloads.insert("small-q5_1".into(), 1234);
+        })
+        .unwrap();
     let g = ConfigFile::<State>::open(&p);
     let s = g.value();
     assert!(s.first_run_complete);
-    assert_eq!(s.gpu_probes["RTX 4060|551.23"], GpuProbe { approved: true, speedup: 2.5 });
+    assert_eq!(
+        s.gpu_probes["RTX 4060|551.23"],
+        GpuProbe {
+            approved: true,
+            speedup: 2.5
+        }
+    );
     assert_eq!(s.downloads["small-q5_1"], 1234);
-    settings_proc.update(|s| { s.downloads.clear(); }).unwrap();
+    settings_proc
+        .update(|s| {
+            s.downloads.clear();
+        })
+        .unwrap();
     assert!(ConfigFile::<State>::open(&p).value().downloads.is_empty());
 }
 

@@ -41,12 +41,18 @@ pub fn select(choice: &MicChoice, available: &[DeviceInfo]) -> Selection {
 mod tests {
     use super::*;
     fn dev(id: &str) -> DeviceInfo {
-        DeviceInfo { id: id.into(), name: id.into() }
+        DeviceInfo {
+            id: id.into(),
+            name: id.into(),
+        }
     }
 
     #[test]
     fn system_default_follows_windows() {
-        assert_eq!(select(&MicChoice::SystemDefault, &[dev("a")]), Selection::Default);
+        assert_eq!(
+            select(&MicChoice::SystemDefault, &[dev("a")]),
+            Selection::Default
+        );
     }
 
     #[test]
@@ -59,12 +65,21 @@ mod tests {
 
     #[test]
     fn missing_choice_falls_back_to_default_with_note() {
-        assert_eq!(select(&MicChoice::Specific("x".into()), &[dev("a")]), Selection::DefaultWithNote);
+        assert_eq!(
+            select(&MicChoice::Specific("x".into()), &[dev("a")]),
+            Selection::DefaultWithNote
+        );
     }
 
     #[test]
     fn no_endpoints_is_no_microphone_for_either_choice() {
-        assert_eq!(select(&MicChoice::SystemDefault, &[]), Selection::NoMicrophone);
-        assert_eq!(select(&MicChoice::Specific("x".into()), &[]), Selection::NoMicrophone);
+        assert_eq!(
+            select(&MicChoice::SystemDefault, &[]),
+            Selection::NoMicrophone
+        );
+        assert_eq!(
+            select(&MicChoice::Specific("x".into()), &[]),
+            Selection::NoMicrophone
+        );
     }
 }

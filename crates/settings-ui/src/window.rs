@@ -5,11 +5,11 @@ use crate::capture::CaptureState;
 use crate::codes::{display_binding, vk_for_code_name};
 use crate::download::{download_model, DownloadError, UreqHttp};
 use crate::ipc::PipeClient;
+use crate::items_view::{ItemsMsg, ItemsPanel};
+use crate::items_win::{WinLogin, WinMics};
 use crate::manager::{ModelManager, ModelStatus, Selection};
 use crate::session::RebindSession;
 use aloud_type_config::{AppPaths, ConfigFile};
-use crate::items_view::{ItemsMsg, ItemsPanel};
-use crate::items_win::{WinLogin, WinMics};
 use aloud_type_models::{find, is_installed, VAD_MODEL};
 use iced::widget::{button, column, row, scrollable, text};
 use iced::{keyboard, Element, Subscription, Task};
@@ -49,10 +49,18 @@ struct App {
 
 impl App {
     fn boot() -> (App, Task<Message>) {
-        let paths = AppPaths::from_env().unwrap_or_else(|| AppPaths::under(std::path::Path::new(".")));
+        let paths =
+            AppPaths::from_env().unwrap_or_else(|| AppPaths::under(std::path::Path::new(".")));
         let app = App {
-            session: RebindSession::new(ConfigFile::open(paths.settings_file()), PipeClient::default()),
-            items: ItemsPanel::new(ConfigFile::open(paths.settings_file()), WinLogin::new(), WinMics::new()),
+            session: RebindSession::new(
+                ConfigFile::open(paths.settings_file()),
+                PipeClient::default(),
+            ),
+            items: ItemsPanel::new(
+                ConfigFile::open(paths.settings_file()),
+                WinLogin::new(),
+                WinMics::new(),
+            ),
             started: Instant::now(),
             info: None,
             warning: None,
@@ -84,12 +92,18 @@ impl App {
     }
 
     fn begin_download(&mut self, id: &'static str) -> Task<Message> {
-        let Some(info) = find(id) else { return Task::none() };
+        let Some(info) = find(id) else {
+            return Task::none();
+        };
         if self.workers.iter().any(|(w, _)| *w == id) {
             return Task::none();
         }
         self.models.start_download(id);
-        let shared = Arc::new(Mutex::new(Shared { done: 0, total: info.size, result: None }));
+        let shared = Arc::new(Mutex::new(Shared {
+            done: 0,
+            total: info.size,
+            result: None,
+        }));
         self.workers.push((id, shared.clone()));
         let dir = self.models.models_dir().to_path_buf();
         std::thread::spawn(move || {
@@ -179,7 +193,8 @@ impl App {
         .spacing(10)
         .padding(20);
         if self.session.is_capturing() {
-            col = col.push(text("Press the key or combination, then release. Esc cancels.").size(13));
+            col =
+                col.push(text("Press the key or combination, then release. Esc cancels.").size(13));
         }
         if let Some(i) = &self.info {
             col = col.push(text(i.clone()).size(14));
@@ -190,7 +205,10 @@ impl App {
         if let Some(e) = self.session.save_error() {
             col = col.push(text(format!("Could not save: {e}")).size(14));
         }
-        let col = col.push(text(HELP_LINE).size(12)).push(self.model_section()).push(self.items.view().map(Message::Items));
+        let col = col
+            .push(text(HELP_LINE).size(12))
+            .push(self.model_section())
+            .push(self.items.view().map(Message::Items));
         scrollable(col).into()
     }
 
@@ -200,22 +218,36 @@ impl App {
             let m = self.models.first_run_model();
             col = col.push(text("Download a Speech model to start dictating. It is a one-time download; afterwards Aloud Type never uses the network.").size(13));
             col = col.push(
-                button(text(format!("Download {} ({})", m.label, crate::manager::size_text(m.size))))
-                    .on_press(Message::Download(m.id)),
+                button(text(format!(
+                    "Download {} ({})",
+                    m.label,
+                    crate::manager::size_text(m.size)
+                )))
+                .on_press(Message::Download(m.id)),
             );
         }
         for r in self.models.rows() {
             let mark = if r.selected { "(x)" } else { "( )" };
             let name = text(format!("{mark} {}  {}", r.label, r.size_text)).size(14);
             let status: Element<'_, Message> = match &r.status {
-                ModelStatus::Downloaded => button(text("Use")).on_press_maybe((!r.selected).then_some(Message::SelectModel(r.id))).into(),
-                ModelStatus::NotDownloaded => button(text("Download")).on_press(Message::SelectModel(r.id)).into(),
-                ModelStatus::Downloading { done, total } => {
-                    text(format!("Downloading {}%", if *total == 0 { 0 } else { done * 100 / total })).size(13).into()
-                }
-                ModelStatus::Failed(e) => row![text(e.message()).size(13), button(text("Retry")).on_press(Message::Download(r.id))]
-                    .spacing(8)
+                ModelStatus::Downloaded => button(text("Use"))
+                    .on_press_maybe((!r.selected).then_some(Message::SelectModel(r.id)))
                     .into(),
+                ModelStatus::NotDownloaded => button(text("Download"))
+                    .on_press(Message::SelectModel(r.id))
+                    .into(),
+                ModelStatus::Downloading { done, total } => text(format!(
+                    "Downloading {}%",
+                    if *total == 0 { 0 } else { done * 100 / total }
+                ))
+                .size(13)
+                .into(),
+                ModelStatus::Failed(e) => row![
+                    text(e.message()).size(13),
+                    button(text("Retry")).on_press(Message::Download(r.id))
+                ]
+                .spacing(8)
+                .into(),
             };
             col = col.push(row![name, status].spacing(10));
         }

@@ -4,7 +4,8 @@
 //! process is told to reload, so it applies without a restart.
 use crate::ipc::{Command, ResidentLink, Transport};
 use aloud_type_config::{
-    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State, VerticalPosition,
+    ConfigFile, Gpu, HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, State,
+    VerticalPosition,
 };
 use std::io;
 
@@ -14,16 +15,39 @@ pub const SOURCE_URL: &str = "https://github.com/radzap/Aloud-Type";
 
 /// Common Whisper languages offered for a fixed choice (code, name).
 pub const LANGUAGES: &[(&str, &str)] = &[
-    ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"), ("it", "Italian"),
-    ("pt", "Portuguese"), ("nl", "Dutch"), ("pl", "Polish"), ("ru", "Russian"), ("uk", "Ukrainian"),
-    ("cs", "Czech"), ("sv", "Swedish"), ("da", "Danish"), ("no", "Norwegian"), ("fi", "Finnish"),
-    ("el", "Greek"), ("tr", "Turkish"), ("he", "Hebrew"), ("ar", "Arabic"), ("hi", "Hindi"),
-    ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"), ("vi", "Vietnamese"), ("id", "Indonesian"),
+    ("en", "English"),
+    ("es", "Spanish"),
+    ("fr", "French"),
+    ("de", "German"),
+    ("it", "Italian"),
+    ("pt", "Portuguese"),
+    ("nl", "Dutch"),
+    ("pl", "Polish"),
+    ("ru", "Russian"),
+    ("uk", "Ukrainian"),
+    ("cs", "Czech"),
+    ("sv", "Swedish"),
+    ("da", "Danish"),
+    ("no", "Norwegian"),
+    ("fi", "Finnish"),
+    ("el", "Greek"),
+    ("tr", "Turkish"),
+    ("he", "Hebrew"),
+    ("ar", "Arabic"),
+    ("hi", "Hindi"),
+    ("zh", "Chinese"),
+    ("ja", "Japanese"),
+    ("ko", "Korean"),
+    ("vi", "Vietnamese"),
+    ("id", "Indonesian"),
 ];
 
 /// English-only Whisper models are named like `base.en-q5_1`.
 pub fn is_english_only(model: &str) -> bool {
-    model.split('-').next().is_some_and(|stem| stem.ends_with(".en"))
+    model
+        .split('-')
+        .next()
+        .is_some_and(|stem| stem.ends_with(".en"))
 }
 
 /// Per-user "launch at login" (the Windows Run key in the real build).
@@ -56,7 +80,14 @@ pub struct ItemsSession<T: Transport, L: LoginItem, M: MicLister> {
 
 impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
     pub fn new(config: ConfigFile<Settings>, transport: T, login: L, mics: M) -> Self {
-        Self { config, link: ResidentLink::new(transport), login, mics, state: None, error: None }
+        Self {
+            config,
+            link: ResidentLink::new(transport),
+            login,
+            mics,
+            state: None,
+            error: None,
+        }
     }
 
     /// Give the session the state file so the GPU choices and error notice can be shown.
@@ -67,11 +98,20 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
 
     /// Auto, CPU only, then every device a probe has seen (names from the state file).
     pub fn gpu_options(&self) -> Vec<(Gpu, String)> {
-        let mut out = vec![(Gpu::Auto, "Auto".to_string()), (Gpu::CpuOnly, "CPU only".to_string())];
+        let mut out = vec![
+            (Gpu::Auto, "Auto".to_string()),
+            (Gpu::CpuOnly, "CPU only".to_string()),
+        ];
         let mut names: Vec<String> = self
             .state
             .as_ref()
-            .map(|s| s.value().gpu_probes.keys().map(|k| k.split('|').next().unwrap_or(k).to_string()).collect())
+            .map(|s| {
+                s.value()
+                    .gpu_probes
+                    .keys()
+                    .map(|k| k.split('|').next().unwrap_or(k).to_string())
+                    .collect()
+            })
             .unwrap_or_default();
         if let Gpu::Device(d) = &self.config.value().gpu {
             names.push(d.clone());
@@ -89,7 +129,9 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
     /// Shown in Settings when a backend error switched the GPU off for the session.
     pub fn gpu_notice(&self) -> Option<&'static str> {
         let st = self.state.as_ref()?;
-        st.value().gpu_disabled_after_error.then_some("GPU disabled after an error")
+        st.value()
+            .gpu_disabled_after_error
+            .then_some("GPU disabled after an error")
     }
 
     /// Re-test: the resident process forgets the error and saved results and probes again.
@@ -112,12 +154,21 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
 
     /// System default first, then each device; a saved but absent choice stays visible.
     pub fn mic_options(&self) -> Vec<MicOption> {
-        let mut out = vec![MicOption { id: None, label: "System default".into() }];
+        let mut out = vec![MicOption {
+            id: None,
+            label: "System default".into(),
+        }];
         let devices = self.mics.list();
-        out.extend(devices.iter().map(|(id, name)| MicOption { id: Some(id.clone()), label: name.clone() }));
+        out.extend(devices.iter().map(|(id, name)| MicOption {
+            id: Some(id.clone()),
+            label: name.clone(),
+        }));
         if let Some(saved) = &self.config.value().microphone {
             if !devices.iter().any(|(id, _)| id == saved) {
-                out.push(MicOption { id: Some(saved.clone()), label: format!("{saved} (not connected)") });
+                out.push(MicOption {
+                    id: Some(saved.clone()),
+                    label: format!("{saved} (not connected)"),
+                });
             }
         }
         out
@@ -210,7 +261,10 @@ mod tests {
     struct Mics(Vec<(&'static str, &'static str)>);
     impl MicLister for Mics {
         fn list(&self) -> Vec<(String, String)> {
-            self.0.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+            self.0
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
         }
     }
 
@@ -220,7 +274,12 @@ mod tests {
         let p = d.path().join("settings.toml");
         let fake = Fake::default();
         let mics = Mics(vec![("a", "USB Mic"), ("b", "Headset")]);
-        (ItemsSession::new(ConfigFile::open(&p), fake.clone(), login, mics), fake, d, p)
+        (
+            ItemsSession::new(ConfigFile::open(&p), fake.clone(), login, mics),
+            fake,
+            d,
+            p,
+        )
     }
     fn reread(p: &std::path::Path) -> Settings {
         ConfigFile::<Settings>::open(p).value().clone()
@@ -230,7 +289,13 @@ mod tests {
     fn microphone_list_starts_with_system_default() {
         let (s, ..) = session(Login::default());
         let o = s.mic_options();
-        assert_eq!(o[0], MicOption { id: None, label: "System default".into() });
+        assert_eq!(
+            o[0],
+            MicOption {
+                id: None,
+                label: "System default".into()
+            }
+        );
         assert_eq!(o.len(), 3);
         assert_eq!(o[1].label, "USB Mic");
     }
@@ -296,7 +361,9 @@ mod tests {
         assert!(!is_english_only("large-v3-turbo-q5_0"));
         let (mut s, _f, _d, p) = session(Login::default());
         assert!(s.language_enabled());
-        s.config.update(|x| x.speech_model = "base.en-q5_1".into()).unwrap();
+        s.config
+            .update(|x| x.speech_model = "base.en-q5_1".into())
+            .unwrap();
         assert!(!s.language_enabled());
         s.set_language(Language::Auto);
         assert_ne!(reread(&p).language, Language::Auto);
@@ -318,7 +385,10 @@ mod tests {
 
     #[test]
     fn failed_registry_write_is_reported_and_not_saved() {
-        let (mut s, fake, _d, p) = session(Login { fail: true, ..Default::default() });
+        let (mut s, fake, _d, p) = session(Login {
+            fail: true,
+            ..Default::default()
+        });
         s.set_launch_at_login(true);
         assert!(s.error().unwrap().contains("launch at login"));
         assert!(!reread(&p).launch_at_login);
@@ -331,7 +401,13 @@ mod tests {
         let sp = d.path().join("state.toml");
         let mut st = ConfigFile::<State>::open(&sp);
         st.update(|x| {
-            x.gpu_probes.insert("RTX 4060|31.0.1".into(), aloud_type_config::GpuProbe { approved: true, speedup: 3.0 });
+            x.gpu_probes.insert(
+                "RTX 4060|31.0.1".into(),
+                aloud_type_config::GpuProbe {
+                    approved: true,
+                    speedup: 3.0,
+                },
+            );
             x.gpu_disabled_after_error = true;
         })
         .unwrap();

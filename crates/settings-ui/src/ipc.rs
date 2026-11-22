@@ -49,7 +49,10 @@ impl Default for PipeClient {
 
 impl Transport for PipeClient {
     fn request(&mut self, line: &str) -> io::Result<String> {
-        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(&self.name)?;
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.name)?;
         writeln!(f, "{line}")?;
         let mut reply = String::new();
         BufReader::new(f).read_line(&mut reply)?;

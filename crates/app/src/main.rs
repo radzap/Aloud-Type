@@ -16,7 +16,10 @@ fn main() {
 #[cfg(windows)]
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.iter().any(|a| a == aloud_type_recognizer::gpu::PROBE_FLAG) {
+    if args
+        .iter()
+        .any(|a| a == aloud_type_recognizer::gpu::PROBE_FLAG)
+    {
         std::process::exit(aloud_type_recognizer::gpu::probe_child_main(&args));
     }
     if args.iter().any(|a| a == "--settings") {
@@ -45,8 +48,8 @@ mod host {
     use aloud_type_app::wiring::*;
     use aloud_type_app::*;
     use aloud_type_config::{
-        verbose_requested, AppPaths, ConfigFile, Event, HorizontalPosition, IndicatorStyle, Logger, ModelMemory,
-        Settings, SettingsNotice, State, StdFs, VerticalPosition,
+        verbose_requested, AppPaths, ConfigFile, Event, HorizontalPosition, IndicatorStyle, Logger,
+        ModelMemory, Settings, SettingsNotice, State, StdFs, VerticalPosition,
     };
     use aloud_type_core::ipc::{Command as PipeCommand, PIPE_NAME};
     use aloud_type_core::lifecycle::LifecycleConfig;
@@ -67,8 +70,8 @@ mod host {
     use aloud_type_platform_windows::overlay_model::{Placement, Style};
     use aloud_type_platform_windows::pipe_server::PipeServer;
     use aloud_type_platform_windows::power_win::PowerWatcher;
-    use aloud_type_platform_windows::thread_priority;
     use aloud_type_platform_windows::settings_launcher::{ExeSpawner, SettingsLauncher};
+    use aloud_type_platform_windows::thread_priority;
     use aloud_type_platform_windows::tray::{self, TrayHandle};
     use aloud_type_platform_windows::tray_model::{self, startup_action, Command as TrayCommand};
     use aloud_type_recognizer::SileroVoiceGate;
@@ -119,14 +122,20 @@ mod host {
     struct ElevatedGate;
     impl StartGate for ElevatedGate {
         fn check(&mut self) -> Option<String> {
-            check_can_start(&mut ForegroundElevation).err().map(|f| f.message().to_string())
+            check_can_start(&mut ForegroundElevation)
+                .err()
+                .map(|f| f.message().to_string())
         }
     }
 
     struct SlotFaults(FaultSlot);
     impl TypingFaults for SlotFaults {
         fn take(&mut self) -> Option<String> {
-            self.0.lock().unwrap().take().map(|f| f.message().to_string())
+            self.0
+                .lock()
+                .unwrap()
+                .take()
+                .map(|f| f.message().to_string())
         }
     }
 
@@ -174,7 +183,11 @@ mod host {
     impl BackgroundSpawner for ExeBackground {
         fn spawn_background_models(&mut self) {
             use std::os::windows::process::CommandExt;
-            if self.0.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None))) {
+            if self
+                .0
+                .as_mut()
+                .is_some_and(|c| matches!(c.try_wait(), Ok(None)))
+            {
                 return;
             }
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -229,7 +242,10 @@ mod host {
             }
         }
         fn set_placement(&mut self, v: VerticalPosition, h: HorizontalPosition) {
-            if let (Some(o), Some(p)) = (&self.overlay, Placement::from_settings(v.as_str(), h.as_str())) {
+            if let (Some(o), Some(p)) = (
+                &self.overlay,
+                Placement::from_settings(v.as_str(), h.as_str()),
+            ) {
                 o.set_placement(p);
             }
         }
@@ -259,7 +275,11 @@ mod host {
             Tray::Fault(r) => format!(" [tray fault: {r}]"),
             _ => String::new(),
         };
-        let key = if key_unavailable { " [Dictation key unavailable]" } else { "" };
+        let key = if key_unavailable {
+            " [Dictation key unavailable]"
+        } else {
+            ""
+        };
         format!("{ind}{tray}{key}")
     }
 
@@ -343,15 +363,20 @@ mod host {
             let dir = models_dir.clone();
             let (settings_path, state_path) = (paths.settings_file(), paths.state_file());
             Arc::new(move |id: &str| {
-                let info = aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
-                let path = aloud_type_models::verified_path(&dir, info).map_err(|e| format!("{e:?}"))?;
+                let info =
+                    aloud_type_models::find(id).ok_or_else(|| format!("unknown model {id}"))?;
+                let path =
+                    aloud_type_models::verified_path(&dir, info).map_err(|e| format!("{e:?}"))?;
                 use aloud_type_recognizer::gpu;
                 // The probe benchmarks the base q5_1 model (spec); fall back to the model being loaded.
                 let probe_model = aloud_type_models::find("base-q5_1")
                     .and_then(|i| aloud_type_models::verified_path(&dir, i).ok())
                     .unwrap_or_else(|| path.clone());
                 let runner = gpu::probe_runner(&probe_model).map_err(|e| e.to_string())?;
-                let gpu_setting = ConfigFile::<Settings>::open(settings_path.clone()).value().gpu.clone();
+                let gpu_setting = ConfigFile::<Settings>::open(settings_path.clone())
+                    .value()
+                    .gpu
+                    .clone();
                 let m = gpu::open_for_host(
                     Box::new(gpu::WhisperBackend::new(&path)),
                     &gpu_setting,
@@ -372,10 +397,16 @@ mod host {
         );
         residency.set_waker(wake.notifier());
 
-        let placement = Placement::from_settings(first.indicator_vertical.as_str(), first.indicator_horizontal.as_str())
-            .unwrap_or_else(|| Placement::from_settings("bottom", "center").unwrap());
+        let placement = Placement::from_settings(
+            first.indicator_vertical.as_str(),
+            first.indicator_horizontal.as_str(),
+        )
+        .unwrap_or_else(|| Placement::from_settings("bottom", "center").unwrap());
         let overlay = overlay::spawn(placement).ok();
-        let mut shown = Shown { overlay: overlay.clone(), tray: tray.clone() };
+        let mut shown = Shown {
+            overlay: overlay.clone(),
+            tray: tray.clone(),
+        };
 
         let hook = match KeyboardHook::start_notifying(HookConfig::default(), wake.notifier()) {
             Ok(h) => Rc::new(h),
@@ -411,7 +442,9 @@ mod host {
                 dirty.store(true, Ordering::SeqCst);
                 notify();
             });
-            if let (Some(dir), Some(name)) = (file.parent(), file.file_name().and_then(|n| n.to_str())) {
+            if let (Some(dir), Some(name)) =
+                (file.parent(), file.file_name().and_then(|n| n.to_str()))
+            {
                 if watch_file(dir, name, changed).is_err() {
                     logger.log(clock.now(), Event::new("settings_watch_unavailable"));
                 }
@@ -432,7 +465,10 @@ mod host {
             let mut notice = SettingsNotice::new();
             Box::new(move || {
                 let status = file.reload().clone();
-                Loaded { settings: file.value().clone(), notice: notice.observe(&status).map(str::to_string) }
+                Loaded {
+                    settings: file.value().clone(),
+                    notice: notice.observe(&status).map(str::to_string),
+                }
             })
         };
         let mut settings_host = SettingsHost::new(live, source);
@@ -441,15 +477,23 @@ mod host {
 
         let find_vad = {
             let dir = models_dir.clone();
-            Box::new(move || aloud_type_models::verified_path(&dir, &aloud_type_models::VAD_MODEL).ok())
+            Box::new(move || {
+                aloud_type_models::verified_path(&dir, &aloud_type_models::VAD_MODEL).ok()
+            })
         };
         let mut c = Controller::new(Parts {
             keyboard: SharedHook(hook.clone()),
             clock,
             lifecycle: lifecycle_for(&first),
-            capture: Box::new(MicCapture(AudioCapture::new(CpalBackend, Box::new(WinRegistry)))),
+            capture: Box::new(MicCapture(AudioCapture::new(
+                CpalBackend,
+                Box::new(WinRegistry),
+            ))),
             recognizer: Box::new(residency.recognizer()),
-            voice_gate: Box::new(LazyGate { find: find_vad, gate: None }),
+            voice_gate: Box::new(LazyGate {
+                find: find_vad,
+                gate: None,
+            }),
             sink: Box::new(sink),
             start_gate: Box::new(ElevatedGate),
             typing_faults: Box::new(SlotFaults(fault_slot)),
@@ -458,7 +502,10 @@ mod host {
         });
         c.set_residency(residency.clone());
         let p = paths.clone();
-        c.set_setup_gate(Box::new(Setup { complete: Box::new(move || setup_complete(&p)), commands }));
+        c.set_setup_gate(Box::new(Setup {
+            complete: Box::new(move || setup_complete(&p)),
+            commands,
+        }));
 
         let controller = RefCell::new(c);
         let settings_host = RefCell::new(settings_host);

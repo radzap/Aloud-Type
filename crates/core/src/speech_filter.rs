@@ -37,7 +37,11 @@ mod tests {
     use super::*;
 
     fn s(text: &str, p: f32) -> Segment {
-        Segment { text: text.into(), words: vec![], no_speech_prob: p }
+        Segment {
+            text: text.into(),
+            words: vec![],
+            no_speech_prob: p,
+        }
     }
 
     #[test]

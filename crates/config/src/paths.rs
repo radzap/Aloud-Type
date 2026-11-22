@@ -8,7 +8,9 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn under(local_app_data: &Path) -> Self {
-        AppPaths { app_dir: local_app_data.join("AloudType") }
+        AppPaths {
+            app_dir: local_app_data.join("AloudType"),
+        }
     }
     pub fn from_env() -> Option<Self> {
         std::env::var_os("LOCALAPPDATA").map(|p| Self::under(Path::new(&p)))

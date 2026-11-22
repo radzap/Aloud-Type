@@ -71,10 +71,16 @@ impl Default for Settings {
     }
 }
 
-fn parse_enum<T>(doc: &DocumentMut, k: &str, parse: fn(&str) -> Option<T>) -> Result<Option<T>, String> {
+fn parse_enum<T>(
+    doc: &DocumentMut,
+    k: &str,
+    parse: fn(&str) -> Option<T>,
+) -> Result<Option<T>, String> {
     match h::get_str(doc, k)? {
         None => Ok(None),
-        Some(s) => parse(&s).map(Some).ok_or(format!("`{k}` has unknown value \"{s}\"")),
+        Some(s) => parse(&s)
+            .map(Some)
+            .ok_or(format!("`{k}` has unknown value \"{s}\"")),
     }
 }
 
@@ -109,13 +115,19 @@ impl Schema for Settings {
             speech_model: h::get_str(doc, "speech_model")?.unwrap_or(d.speech_model),
             language,
             gpu,
-            model_memory: parse_enum(doc, "model_memory", ModelMemory::parse)?.unwrap_or(d.model_memory),
+            model_memory: parse_enum(doc, "model_memory", ModelMemory::parse)?
+                .unwrap_or(d.model_memory),
             launch_at_login: h::get_bool(doc, "launch_at_login")?.unwrap_or(d.launch_at_login),
-            indicator_style: parse_enum(doc, "indicator_style", IndicatorStyle::parse)?.unwrap_or(d.indicator_style),
+            indicator_style: parse_enum(doc, "indicator_style", IndicatorStyle::parse)?
+                .unwrap_or(d.indicator_style),
             indicator_vertical: parse_enum(doc, "indicator_vertical", VerticalPosition::parse)?
                 .unwrap_or(d.indicator_vertical),
-            indicator_horizontal: parse_enum(doc, "indicator_horizontal", HorizontalPosition::parse)?
-                .unwrap_or(d.indicator_horizontal),
+            indicator_horizontal: parse_enum(
+                doc,
+                "indicator_horizontal",
+                HorizontalPosition::parse,
+            )?
+            .unwrap_or(d.indicator_horizontal),
             tap_threshold_ms: tap,
         })
     }
@@ -145,8 +157,14 @@ impl Schema for Settings {
         h::set_bool(doc, "launch_at_login", self.launch_at_login);
         h::set_str(doc, "indicator_style", self.indicator_style.as_str());
         h::set_str(doc, "indicator_vertical", self.indicator_vertical.as_str());
-        h::set_str(doc, "indicator_horizontal", self.indicator_horizontal.as_str());
-        if self.tap_threshold_ms != DEFAULT_TAP_THRESHOLD_MS || doc.get("tap_threshold_ms").is_some() {
+        h::set_str(
+            doc,
+            "indicator_horizontal",
+            self.indicator_horizontal.as_str(),
+        );
+        if self.tap_threshold_ms != DEFAULT_TAP_THRESHOLD_MS
+            || doc.get("tap_threshold_ms").is_some()
+        {
             h::set_int(doc, "tap_threshold_ms", self.tap_threshold_ms as i64);
         }
     }

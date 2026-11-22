@@ -30,7 +30,10 @@ impl Event {
         Self { label, code: None }
     }
     pub const fn with_code(label: &'static str, code: i64) -> Self {
-        Self { label, code: Some(code) }
+        Self {
+            label,
+            code: Some(code),
+        }
     }
 }
 
@@ -43,7 +46,10 @@ impl<F: Fs> Logger<F> {
     /// `dir` is the app data folder. Without the verbose flag the logger is
     /// inert and never touches the file system.
     pub fn new(fs: F, dir: &std::path::Path, verbose: bool) -> Self {
-        Self { fs, path: verbose.then(|| dir.join(LOG_FILE_NAME)) }
+        Self {
+            fs,
+            path: verbose.then(|| dir.join(LOG_FILE_NAME)),
+        }
     }
 
     pub fn enabled(&self) -> bool {
@@ -98,8 +104,11 @@ mod tests {
         log.log(10, Event::new("dictation started"));
         log.log(25, Event::with_code("microphone error", -2147024891));
         let text = std::fs::read_to_string(dir.path().join(LOG_FILE_NAME)).unwrap();
-        assert_eq!(text, "10 dictation started
+        assert_eq!(
+            text,
+            "10 dictation started
 25 microphone error code=-2147024891
-");
+"
+        );
     }
 }

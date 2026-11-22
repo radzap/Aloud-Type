@@ -21,11 +21,17 @@ pub struct AutoStart<R: RunKey> {
 
 impl<R: RunKey> AutoStart<R> {
     pub fn new(run: R) -> Self {
-        Self { run, name: VALUE_NAME.into() }
+        Self {
+            run,
+            name: VALUE_NAME.into(),
+        }
     }
 
     pub fn with_value_name(run: R, name: &str) -> Self {
-        Self { run, name: name.into() }
+        Self {
+            run,
+            name: name.into(),
+        }
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -108,7 +114,10 @@ mod tests {
         let exe = PathBuf::from(r"C:\Program Files\Aloud Type\aloud-type.exe");
         a.set_enabled(true, &exe).unwrap();
         assert!(a.is_enabled());
-        assert_eq!(a.run.get("AloudType").unwrap(), r#""C:\Program Files\Aloud Type\aloud-type.exe""#);
+        assert_eq!(
+            a.run.get("AloudType").unwrap(),
+            r#""C:\Program Files\Aloud Type\aloud-type.exe""#
+        );
         a.set_enabled(false, &exe).unwrap();
         assert!(!a.is_enabled());
         a.set_enabled(false, &exe).unwrap(); // idempotent

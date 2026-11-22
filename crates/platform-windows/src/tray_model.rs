@@ -25,12 +25,24 @@ pub struct TrayView {
 /// else can happen while the Dictation key does nothing.
 pub fn view(engine: &Tray, key_unavailable: bool) -> TrayView {
     if key_unavailable {
-        return TrayView { icon: IconKind::Fault, tooltip: format!("{APP_NAME}: {KEY_UNAVAILABLE}") };
+        return TrayView {
+            icon: IconKind::Fault,
+            tooltip: format!("{APP_NAME}: {KEY_UNAVAILABLE}"),
+        };
     }
     match engine {
-        Tray::Idle => TrayView { icon: IconKind::Idle, tooltip: APP_NAME.into() },
-        Tray::Listening => TrayView { icon: IconKind::Listening, tooltip: format!("{APP_NAME}: listening") },
-        Tray::Fault(reason) => TrayView { icon: IconKind::Fault, tooltip: format!("{APP_NAME}: {reason}") },
+        Tray::Idle => TrayView {
+            icon: IconKind::Idle,
+            tooltip: APP_NAME.into(),
+        },
+        Tray::Listening => TrayView {
+            icon: IconKind::Listening,
+            tooltip: format!("{APP_NAME}: listening"),
+        },
+        Tray::Fault(reason) => TrayView {
+            icon: IconKind::Fault,
+            tooltip: format!("{APP_NAME}: {reason}"),
+        },
     }
 }
 
@@ -50,14 +62,20 @@ pub struct MenuItem {
 /// The context menu. The privacy entry exists only while the
 /// microphone-blocked fault stands.
 pub fn menu(blocked_fault_standing: bool) -> Vec<MenuItem> {
-    let mut items = vec![MenuItem { label: "Settings", command: Command::OpenSettings }];
+    let mut items = vec![MenuItem {
+        label: "Settings",
+        command: Command::OpenSettings,
+    }];
     if blocked_fault_standing {
         items.push(MenuItem {
             label: "Open microphone privacy settings",
             command: Command::OpenMicrophonePrivacySettings,
         });
     }
-    items.push(MenuItem { label: "Exit", command: Command::Exit });
+    items.push(MenuItem {
+        label: "Exit",
+        command: Command::Exit,
+    });
     items
 }
 
@@ -85,7 +103,10 @@ pub fn key_display_name(name: &str) -> String {
 
 /// "Right Ctrl", or "Ctrl + Space" for a combination.
 pub fn dictation_key_label(keys: &[String]) -> String {
-    keys.iter().map(|k| key_display_name(k)).collect::<Vec<_>>().join(" + ")
+    keys.iter()
+        .map(|k| key_display_name(k))
+        .collect::<Vec<_>>()
+        .join(" + ")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,7 +184,11 @@ mod tests {
         let blocked: Vec<_> = menu(true).iter().map(|m| m.command).collect();
         assert_eq!(
             blocked,
-            [Command::OpenSettings, Command::OpenMicrophonePrivacySettings, Command::Exit]
+            [
+                Command::OpenSettings,
+                Command::OpenMicrophonePrivacySettings,
+                Command::Exit
+            ]
         );
     }
 
@@ -183,12 +208,18 @@ mod tests {
             StartupAction::Notice("Aloud Type is running. Hold Caps Lock to dictate.".into())
         );
         assert_eq!(dictation_key_label(&keys(&["F9"])), "F9");
-        assert_eq!(dictation_key_label(&keys(&["LeftCtrl", "Space"])), "Left Ctrl + Space");
+        assert_eq!(
+            dictation_key_label(&keys(&["LeftCtrl", "Space"])),
+            "Left Ctrl + Space"
+        );
     }
 
     #[test]
     fn incomplete_setup_opens_settings_instead_of_notice() {
-        assert_eq!(startup_action(false, &keys(&["RightCtrl"])), StartupAction::OpenSettings);
+        assert_eq!(
+            startup_action(false, &keys(&["RightCtrl"])),
+            StartupAction::OpenSettings
+        );
     }
 
     #[test]

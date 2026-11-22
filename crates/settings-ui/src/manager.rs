@@ -5,14 +5,19 @@
 use crate::download::{part_path, DownloadError};
 use crate::ipc::{Command, ResidentLink, Transport};
 use aloud_type_config::{ConfigFile, Language, Settings, State};
-use aloud_type_models::{find, is_installed, language_setting_enabled, ModelInfo, CATALOG, FIRST_RUN_MODEL};
+use aloud_type_models::{
+    find, is_installed, language_setting_enabled, ModelInfo, CATALOG, FIRST_RUN_MODEL,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelStatus {
     NotDownloaded,
-    Downloading { done: u64, total: u64 },
+    Downloading {
+        done: u64,
+        total: u64,
+    },
     Downloaded,
     /// The last attempt failed; the row shows the message and Retry.
     Failed(DownloadError),
@@ -56,7 +61,12 @@ pub fn size_text(bytes: u64) -> String {
 }
 
 impl<T: Transport> ModelManager<T> {
-    pub fn new(dir: PathBuf, settings: ConfigFile<Settings>, state: ConfigFile<State>, transport: T) -> Self {
+    pub fn new(
+        dir: PathBuf,
+        settings: ConfigFile<Settings>,
+        state: ConfigFile<State>,
+        transport: T,
+    ) -> Self {
         Self {
             dir,
             settings,
@@ -117,7 +127,9 @@ impl<T: Transport> ModelManager<T> {
 
     /// The user picked a model in the list.
     pub fn select(&mut self, id: &str) -> Selection {
-        let Some(m) = find(id) else { return Selection::Unknown };
+        let Some(m) = find(id) else {
+            return Selection::Unknown;
+        };
         if is_installed(&self.dir, m) {
             self.pending_select = None;
             self.apply_selection(m);
@@ -142,7 +154,9 @@ impl<T: Transport> ModelManager<T> {
     pub fn start_download(&mut self, id: &str) {
         let Some(m) = find(id) else { return };
         self.failed.remove(m.id);
-        let have = std::fs::metadata(part_path(&self.dir, m)).map(|x| x.len()).unwrap_or(0);
+        let have = std::fs::metadata(part_path(&self.dir, m))
+            .map(|x| x.len())
+            .unwrap_or(0);
         self.downloading.insert(m.id, (have.min(m.size), m.size));
         if self.pending_select.is_none() && self.needs_setup() {
             // The one-click first-run download also becomes the chosen model.
@@ -174,7 +188,9 @@ impl<T: Transport> ModelManager<T> {
             }
             Err(e) => {
                 self.failed.insert(m.id, e);
-                let kept = std::fs::metadata(part_path(&self.dir, m)).map(|x| x.len()).unwrap_or(0);
+                let kept = std::fs::metadata(part_path(&self.dir, m))
+                    .map(|x| x.len())
+                    .unwrap_or(0);
                 let _ = self.state.update(|s| {
                     if kept > 0 {
                         s.downloads.insert(m.id.to_string(), kept);

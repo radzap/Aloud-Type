@@ -29,7 +29,9 @@ pub fn model(name: &str) -> Option<PathBuf> {
 
 /// Load a 16-bit PCM mono 16 kHz WAV as f32 samples.
 pub fn wav(name: &str) -> Vec<f32> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
     let b = std::fs::read(path).expect("fixture");
     assert_eq!(&b[0..4], b"RIFF");
     let mut i = 12;
@@ -38,7 +40,9 @@ pub fn wav(name: &str) -> Vec<f32> {
         let len = u32::from_le_bytes(b[i + 4..i + 8].try_into().unwrap()) as usize;
         if id == b"data" {
             return b[i + 8..i + 8 + len]
-                .as_chunks::<2>().0.iter()
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
                 .collect();
         }

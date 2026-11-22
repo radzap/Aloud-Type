@@ -23,7 +23,10 @@ pub struct SettingsLauncher<S: Spawner> {
 
 impl<S: Spawner> SettingsLauncher<S> {
     pub fn new(spawner: S) -> Self {
-        Self { spawner, child: None }
+        Self {
+            spawner,
+            child: None,
+        }
     }
 
     /// Spawns Settings unless one is already open, in which case that window
@@ -83,7 +86,10 @@ fn raise_windows_of_process(_pid: u32) {}
 impl Spawner for ExeSpawner {
     type Child = ProcessChild;
     fn spawn(&mut self) -> io::Result<ProcessChild> {
-        std::process::Command::new(std::env::current_exe()?).arg("--settings").spawn().map(ProcessChild)
+        std::process::Command::new(std::env::current_exe()?)
+            .arg("--settings")
+            .spawn()
+            .map(ProcessChild)
     }
 }
 
@@ -122,7 +128,15 @@ mod tests {
     fn launcher(fail: bool) -> (SettingsLauncher<FakeSpawner>, Rc<Cell<bool>>, Rc<Cell<u32>>) {
         let running = Rc::new(Cell::new(false));
         let spawned = Rc::new(Cell::new(0));
-        (SettingsLauncher::new(FakeSpawner { running: running.clone(), spawned: spawned.clone(), fail }), running, spawned)
+        (
+            SettingsLauncher::new(FakeSpawner {
+                running: running.clone(),
+                spawned: spawned.clone(),
+                fail,
+            }),
+            running,
+            spawned,
+        )
     }
 
     #[test]
@@ -138,7 +152,11 @@ mod tests {
         let (mut l, _r, _n) = launcher(false);
         RAISED.with(|r| r.set(0));
         l.open().unwrap();
-        assert_eq!(RAISED.with(|r| r.get()), 0, "a fresh window needs no raising");
+        assert_eq!(
+            RAISED.with(|r| r.get()),
+            0,
+            "a fresh window needs no raising"
+        );
         l.open().unwrap();
         assert_eq!(RAISED.with(|r| r.get()), 1);
     }

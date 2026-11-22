@@ -102,7 +102,11 @@ impl Classifier {
     pub fn set_suspended(&mut self, suspended: bool) {
         self.suspended = suspended;
         if suspended {
-            let keys = if self.combo.is_empty() { vec![self.key] } else { self.combo.clone() };
+            let keys = if self.combo.is_empty() {
+                vec![self.key]
+            } else {
+                self.combo.clone()
+            };
             self.set_keys(&keys);
         }
     }
@@ -124,11 +128,18 @@ impl Classifier {
             } else {
                 None
             };
-            return Decision { swallow, post, inject: vec![] };
+            return Decision {
+                swallow,
+                post,
+                inject: vec![],
+            };
         }
         if self.combo_down.contains(&k.vk) {
             // auto-repeat
-            return Decision { swallow: self.held && swallow_it, ..Decision::pass() };
+            return Decision {
+                swallow: self.held && swallow_it,
+                ..Decision::pass()
+            };
         }
         self.combo_down.push(k.vk);
         if self.combo_down.len() == self.combo.len() {
@@ -136,7 +147,11 @@ impl Classifier {
             if swallow_it {
                 self.swallowed_down = Some(k.vk);
             }
-            return Decision { swallow: swallow_it, post: Some(KeyEvent::DictationKeyDown), inject: vec![] };
+            return Decision {
+                swallow: swallow_it,
+                post: Some(KeyEvent::DictationKeyDown),
+                inject: vec![],
+            };
         }
         Decision::pass()
     }
@@ -158,7 +173,11 @@ impl Classifier {
             return self.process_combo(k);
         }
         if k.vk == self.key {
-            return if k.up { self.dictation_up() } else { self.dictation_down() };
+            return if k.up {
+                self.dictation_up()
+            } else {
+                self.dictation_down()
+            };
         }
         if !k.up && self.held && self.modifier && !self.replayed {
             self.replayed = true;
@@ -174,11 +193,18 @@ impl Classifier {
     fn dictation_down(&mut self) -> Decision {
         if self.held {
             // Auto-repeat: swallow so it neither types nor re-triggers.
-            return Decision { swallow: true, ..Decision::pass() };
+            return Decision {
+                swallow: true,
+                ..Decision::pass()
+            };
         }
         self.held = true;
         self.replayed = false;
-        Decision { swallow: true, post: Some(KeyEvent::DictationKeyDown), inject: vec![] }
+        Decision {
+            swallow: true,
+            post: Some(KeyEvent::DictationKeyDown),
+            inject: vec![],
+        }
     }
 
     fn dictation_up(&mut self) -> Decision {
@@ -196,13 +222,22 @@ impl Classifier {
         } else {
             vec![]
         };
-        Decision { swallow: true, post: Some(KeyEvent::DictationKeyUp), inject }
+        Decision {
+            swallow: true,
+            post: Some(KeyEvent::DictationKeyUp),
+            inject,
+        }
     }
 }
 
 /// Watchdog policy: Windows removes a timed-out hook silently, so re-install
 /// periodically, but never while the Dictation key is held.
-pub fn should_reinstall(now_ms: u64, last_install_ms: u64, interval_ms: u64, key_held: bool) -> bool {
+pub fn should_reinstall(
+    now_ms: u64,
+    last_install_ms: u64,
+    interval_ms: u64,
+    key_held: bool,
+) -> bool {
     !key_held && now_ms.saturating_sub(last_install_ms) >= interval_ms
 }
 
@@ -211,17 +246,29 @@ mod tests {
     use super::*;
 
     fn down(vk: u32) -> RawKey {
-        RawKey { vk, up: false, injected: false, extra_info: 0 }
+        RawKey {
+            vk,
+            up: false,
+            injected: false,
+            extra_info: 0,
+        }
     }
     fn up(vk: u32) -> RawKey {
-        RawKey { vk, up: true, ..down(vk) }
+        RawKey {
+            vk,
+            up: true,
+            ..down(vk)
+        }
     }
 
     #[test]
     fn dictation_key_is_swallowed_and_posted_on_down_and_up() {
         let mut c = Classifier::new(VK_RCONTROL);
         let d = c.process(down(VK_RCONTROL));
-        assert_eq!((d.swallow, d.post), (true, Some(KeyEvent::DictationKeyDown)));
+        assert_eq!(
+            (d.swallow, d.post),
+            (true, Some(KeyEvent::DictationKeyDown))
+        );
         let u = c.process(up(VK_RCONTROL));
         assert_eq!((u.swallow, u.post), (true, Some(KeyEvent::DictationKeyUp)));
         assert!(u.inject.is_empty());
@@ -250,12 +297,18 @@ mod tests {
         let d = c.process(down(0x43)); // C
         assert!(d.swallow);
         assert_eq!(d.post, Some(KeyEvent::OtherKeyDown));
-        assert_eq!(d.inject, vec![Inject::Down(VK_RCONTROL), Inject::Down(0x43)]);
+        assert_eq!(
+            d.inject,
+            vec![Inject::Down(VK_RCONTROL), Inject::Down(0x43)]
+        );
         // Later keys pass; the real modifier release passes without an event.
         assert_eq!(c.process(down(0x56)), Decision::pass());
         assert_eq!(c.process(up(VK_RCONTROL)), Decision::pass());
         // Next press starts fresh.
-        assert_eq!(c.process(down(VK_RCONTROL)).post, Some(KeyEvent::DictationKeyDown));
+        assert_eq!(
+            c.process(down(VK_RCONTROL)).post,
+            Some(KeyEvent::DictationKeyDown)
+        );
     }
 
     #[test]
@@ -271,17 +324,28 @@ mod tests {
             let mut c = Classifier::new(vk);
             c.process(down(vk));
             let u = c.process(up(vk));
-            assert_eq!(u.inject, vec![Inject::Down(VK_LCONTROL), Inject::Up(VK_LCONTROL)]);
+            assert_eq!(
+                u.inject,
+                vec![Inject::Down(VK_LCONTROL), Inject::Up(VK_LCONTROL)]
+            );
         }
     }
 
     #[test]
     fn own_tagged_injected_events_are_ignored_but_foreign_injected_are_not() {
         let mut c = Classifier::new(VK_RCONTROL);
-        let own = RawKey { injected: true, extra_info: INJECT_TAG, ..down(VK_RCONTROL) };
+        let own = RawKey {
+            injected: true,
+            extra_info: INJECT_TAG,
+            ..down(VK_RCONTROL)
+        };
         assert_eq!(c.process(own), Decision::pass());
         assert!(!c.held());
-        let foreign = RawKey { injected: true, extra_info: 7, ..down(VK_RCONTROL) };
+        let foreign = RawKey {
+            injected: true,
+            extra_info: 7,
+            ..down(VK_RCONTROL)
+        };
         assert_eq!(c.process(foreign).post, Some(KeyEvent::DictationKeyDown));
     }
 
@@ -303,7 +367,13 @@ mod tests {
         assert_eq!(d.post, Some(KeyEvent::DictationKeyDown));
         assert!(c.held());
         // auto-repeat of the trigger is swallowed and posts nothing
-        assert_eq!(c.process(down(Q)), Decision { swallow: true, ..Decision::default() });
+        assert_eq!(
+            c.process(down(Q)),
+            Decision {
+                swallow: true,
+                ..Decision::default()
+            }
+        );
         let u = c.process(up(Q));
         assert!(u.swallow);
         assert_eq!(u.post, Some(KeyEvent::DictationKeyUp));
@@ -320,7 +390,13 @@ mod tests {
         assert!(!u.swallow);
         assert_eq!(u.post, Some(KeyEvent::DictationKeyUp));
         // trigger up afterwards was swallowed on down, so swallow its up too
-        assert_eq!(c.process(up(Q)), Decision { swallow: true, ..Decision::default() });
+        assert_eq!(
+            c.process(up(Q)),
+            Decision {
+                swallow: true,
+                ..Decision::default()
+            }
+        );
     }
 
     #[test]
@@ -350,7 +426,10 @@ mod tests {
         assert_eq!(c.process(down(VK_RCONTROL)), Decision::pass());
         c.set_suspended(false);
         assert_eq!(c.process(up(VK_RCONTROL)), Decision::pass());
-        assert_eq!(c.process(down(VK_RCONTROL)).post, Some(KeyEvent::DictationKeyDown));
+        assert_eq!(
+            c.process(down(VK_RCONTROL)).post,
+            Some(KeyEvent::DictationKeyDown)
+        );
     }
 
     #[test]

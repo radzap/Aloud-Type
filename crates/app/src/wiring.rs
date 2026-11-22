@@ -2,7 +2,9 @@
 //! restart, routes Settings pipe commands, and publishes controller state to
 //! the tray and overlay. The Windows adapters are plugged in by `main.rs`.
 use crate::{DictationSettings, Mic};
-use aloud_type_config::{HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, VerticalPosition};
+use aloud_type_config::{
+    HorizontalPosition, IndicatorStyle, Language, ModelMemory, Settings, VerticalPosition,
+};
 use aloud_type_core::ipc::Command;
 use aloud_type_core::keynames::vk_for_name;
 use aloud_type_core::lifecycle::LifecycleConfig;
@@ -17,12 +19,18 @@ pub fn dictation_vks(s: &Settings) -> Option<Vec<u32>> {
     v.filter(|v| !v.is_empty())
 }
 
-const MODIFIER_VKS: [u32; 11] = [0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C];
+const MODIFIER_VKS: [u32; 11] = [
+    0x10, 0x11, 0x12, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B, 0x5C,
+];
 
 /// The chord rule applies only when the Dictation key is a lone modifier.
 pub fn lifecycle_for(s: &Settings) -> LifecycleConfig {
-    let modifier_key = matches!(dictation_vks(s).as_deref(), Some([vk]) if MODIFIER_VKS.contains(vk));
-    LifecycleConfig { tap_threshold_ms: s.tap_threshold_ms as u64, modifier_key }
+    let modifier_key =
+        matches!(dictation_vks(s).as_deref(), Some([vk]) if MODIFIER_VKS.contains(vk));
+    LifecycleConfig {
+        tap_threshold_ms: s.tap_threshold_ms as u64,
+        modifier_key,
+    }
 }
 
 pub fn dictation_settings(s: &Settings) -> DictationSettings {
@@ -31,7 +39,10 @@ pub fn dictation_settings(s: &Settings) -> DictationSettings {
             Language::Auto => "auto".into(),
             Language::Fixed(c) => c.clone(),
         },
-        microphone: s.microphone.clone().map_or(Mic::SystemDefault, Mic::Specific),
+        microphone: s
+            .microphone
+            .clone()
+            .map_or(Mic::SystemDefault, Mic::Specific),
     }
 }
 
@@ -66,7 +77,12 @@ pub struct SettingsHost<T: Targets> {
 
 impl<T: Targets> SettingsHost<T> {
     pub fn new(targets: T, source: Box<dyn FnMut() -> Loaded>) -> Self {
-        Self { targets, source, applied: None, current: Rc::new(RefCell::new(DictationSettings::default())) }
+        Self {
+            targets,
+            source,
+            applied: None,
+            current: Rc::new(RefCell::new(DictationSettings::default())),
+        }
     }
 
     /// The language and microphone read when a Dictation starts.
@@ -80,7 +96,10 @@ impl<T: Targets> SettingsHost<T> {
 
     /// Read the settings file and apply what changed (everything on the first call).
     pub fn reload(&mut self) {
-        let Loaded { settings: new, notice } = (self.source)();
+        let Loaded {
+            settings: new,
+            notice,
+        } = (self.source)();
         if let Some(n) = notice {
             self.targets.notify(&n);
         }

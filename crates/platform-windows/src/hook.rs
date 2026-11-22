@@ -1,9 +1,9 @@
 //! `WH_KEYBOARD_LL` hook on its own thread. The callback only classifies
 //! (see `classify`), swallows or passes, and posts to channels; injection of
 //! the chord replay runs on a separate worker so the callback never blocks.
-use crate::win32::{GetMessageW, Msg};
-use crate::hook_health::HookHealth;
 use crate::classify::{should_reinstall, Classifier, Inject, RawKey, INJECT_TAG, VK_RCONTROL};
+use crate::hook_health::HookHealth;
+use crate::win32::{GetMessageW, Msg};
 use aloud_type_core::{KeyEvent, Keyboard};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -50,7 +50,12 @@ struct Input {
 
 #[link(name = "user32")]
 extern "system" {
-    fn SetWindowsHookExW(id: i32, f: unsafe extern "system" fn(i32, usize, isize) -> isize, module: isize, thread: u32) -> Hhook;
+    fn SetWindowsHookExW(
+        id: i32,
+        f: unsafe extern "system" fn(i32, usize, isize) -> isize,
+        module: isize,
+        thread: u32,
+    ) -> Hhook;
     fn UnhookWindowsHookEx(h: Hhook) -> i32;
     fn CallNextHookEx(h: Hhook, code: i32, w: usize, l: isize) -> isize;
     fn SetTimer(hwnd: isize, id: usize, ms: u32, f: usize) -> usize;
@@ -132,11 +137,28 @@ fn send(ops: &[Inject]) {
                 Inject::Up(v) => (v, true),
             };
             let ext = matches!(vk, 0xA3 | 0xA5 | 0x5B | 0x5C);
-            let flags = (if up { KEYEVENTF_KEYUP } else { 0 }) | (if ext { KEYEVENTF_EXTENDEDKEY } else { 0 });
-            Input { kind: INPUT_KEYBOARD, ki: KeybdInput { vk: vk as u16, scan: 0, flags, time: 0, extra_info: INJECT_TAG }, _pad: [0] }
+            let flags = (if up { KEYEVENTF_KEYUP } else { 0 })
+                | (if ext { KEYEVENTF_EXTENDEDKEY } else { 0 });
+            Input {
+                kind: INPUT_KEYBOARD,
+                ki: KeybdInput {
+                    vk: vk as u16,
+                    scan: 0,
+                    flags,
+                    time: 0,
+                    extra_info: INJECT_TAG,
+                },
+                _pad: [0],
+            }
         })
         .collect();
-    unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<Input>() as i32) };
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<Input>() as i32,
+        )
+    };
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,7 +170,10 @@ pub struct HookConfig {
 
 impl Default for HookConfig {
     fn default() -> Self {
-        Self { dictation_vk: VK_RCONTROL, watchdog_interval: Duration::from_secs(10) }
+        Self {
+            dictation_vk: VK_RCONTROL,
+            watchdog_interval: Duration::from_secs(10),
+        }
     }
 }
 
@@ -189,7 +214,12 @@ impl KeyboardHook {
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         std::thread::spawn(move || {
             STATE.with(|s| {
-                *s.borrow_mut() = Some(CbState { classifier: Classifier::new(cfg.dictation_vk), events: ev_tx, inject: inj_tx, notify: notify.clone() })
+                *s.borrow_mut() = Some(CbState {
+                    classifier: Classifier::new(cfg.dictation_vk),
+                    events: ev_tx,
+                    inject: inj_tx,
+                    notify: notify.clone(),
+                })
             });
             if !install() {
                 let _ = ready_tx.send(Err("SetWindowsHookExW failed".into()));
@@ -197,7 +227,14 @@ impl KeyboardHook {
             }
             let _ = ready_tx.send(Ok(unsafe { GetCurrentThreadId() }));
             // Watchdog tick: slow on purpose, an idle app should hardly wake at all.
-            unsafe { SetTimer(0, 1, WATCHDOG_TICK_MS.min(cfg.watchdog_interval.as_millis() as u32), 0) };
+            unsafe {
+                SetTimer(
+                    0,
+                    1,
+                    WATCHDOG_TICK_MS.min(cfg.watchdog_interval.as_millis() as u32),
+                    0,
+                )
+            };
             let started = Instant::now();
             let mut last_install = 0u64;
             let mut msg = Msg::default();
@@ -205,8 +242,14 @@ impl KeyboardHook {
                 match msg.message {
                     WM_TIMER => {
                         let now = started.elapsed().as_millis() as u64;
-                        let held = STATE.with(|s| s.borrow().as_ref().is_some_and(|st| st.classifier.held()));
-                        if should_reinstall(now, last_install, cfg.watchdog_interval.as_millis() as u64, held) {
+                        let held = STATE
+                            .with(|s| s.borrow().as_ref().is_some_and(|st| st.classifier.held()));
+                        if should_reinstall(
+                            now,
+                            last_install,
+                            cfg.watchdog_interval.as_millis() as u64,
+                            held,
+                        ) {
                             uninstall();
                             let ok = install();
                             thread_health.record_install(ok);
@@ -248,7 +291,13 @@ impl KeyboardHook {
             uninstall();
         });
         let thread_id = ready_rx.recv().map_err(|e| e.to_string())??;
-        Ok(Self { rx: ev_rx, thread_id, reinstalls, health, pending_keys })
+        Ok(Self {
+            rx: ev_rx,
+            thread_id,
+            reinstalls,
+            health,
+            pending_keys,
+        })
     }
 
     /// Debug aid: remove the hook the way Windows would, silently.

@@ -73,7 +73,12 @@ impl<B: Backend> AudioCapture<B> {
             out: Vec::new(),
             fault: None,
         }));
-        Self { backend, registry, shared, stream: None }
+        Self {
+            backend,
+            registry,
+            shared,
+            stream: None,
+        }
     }
 
     /// Begin capture for a Dictation. Returns whether the chosen microphone
@@ -92,9 +97,16 @@ impl<B: Backend> AudioCapture<B> {
         };
         {
             let mut s = self.shared.lock().unwrap();
-            *s = Shared { resampler: None, meter: LevelMeter::new(), out: Vec::new(), fault: None };
+            *s = Shared {
+                resampler: None,
+                meter: LevelMeter::new(),
+                out: Vec::new(),
+                fault: None,
+            };
         }
-        let feed = Feed { shared: self.shared.clone() };
+        let feed = Feed {
+            shared: self.shared.clone(),
+        };
         match self.backend.open(device.as_deref(), feed) {
             Ok(stream) => {
                 self.stream = Some(stream);
@@ -182,7 +194,13 @@ mod tests {
     impl FakeBackend {
         fn new(ids: &[&str]) -> Self {
             Self {
-                devices: ids.iter().map(|i| DeviceInfo { id: i.to_string(), name: i.to_string() }).collect(),
+                devices: ids
+                    .iter()
+                    .map(|i| DeviceInfo {
+                        id: i.to_string(),
+                        name: i.to_string(),
+                    })
+                    .collect(),
                 open_error: None,
                 live: Rc::default(),
                 opened_with: Rc::default(),
@@ -205,7 +223,9 @@ mod tests {
             }
             *self.feed.borrow_mut() = Some(feed);
             *self.live.borrow_mut() += 1;
-            Ok(FakeStream { live: self.live.clone() })
+            Ok(FakeStream {
+                live: self.live.clone(),
+            })
         }
     }
 
@@ -244,14 +264,20 @@ mod tests {
     fn privacy_deny_faults_blocked_without_opening_a_stream() {
         let b = FakeBackend::new(&["a"]);
         let mut c = AudioCapture::new(b.clone(), Box::new(DenyReg));
-        assert_eq!(c.start(&MicChoice::SystemDefault), Err(FaultReason::Blocked));
+        assert_eq!(
+            c.start(&MicChoice::SystemDefault),
+            Err(FaultReason::Blocked)
+        );
         assert!(b.opened_with.borrow().is_empty());
     }
 
     #[test]
     fn no_microphones_faults_no_microphone() {
         let b = FakeBackend::new(&[]);
-        assert_eq!(capture(&b).start(&MicChoice::SystemDefault), Err(FaultReason::NoMicrophone));
+        assert_eq!(
+            capture(&b).start(&MicChoice::SystemDefault),
+            Err(FaultReason::NoMicrophone)
+        );
     }
 
     #[test]
@@ -274,9 +300,15 @@ mod tests {
     fn open_errors_are_classified() {
         let mut b = FakeBackend::new(&["a"]);
         b.open_error = Some(CaptureError::new(CaptureErrorKind::DeviceBusy));
-        assert_eq!(capture(&b).start(&MicChoice::SystemDefault), Err(FaultReason::InUse));
+        assert_eq!(
+            capture(&b).start(&MicChoice::SystemDefault),
+            Err(FaultReason::InUse)
+        );
         b.open_error = Some(CaptureError::new(CaptureErrorKind::PermissionDenied));
-        assert_eq!(capture(&b).start(&MicChoice::SystemDefault), Err(FaultReason::Blocked));
+        assert_eq!(
+            capture(&b).start(&MicChoice::SystemDefault),
+            Err(FaultReason::Blocked)
+        );
     }
 
     #[test]
@@ -284,7 +316,8 @@ mod tests {
         let b = FakeBackend::new(&["a"]);
         let mut c = capture(&b);
         c.start(&MicChoice::SystemDefault).unwrap();
-        b.feed().report_error(&CaptureError::new(CaptureErrorKind::DeviceNotAvailable));
+        b.feed()
+            .report_error(&CaptureError::new(CaptureErrorKind::DeviceNotAvailable));
         assert_eq!(c.take_fault(), Some(FaultReason::Disconnected));
         assert!(!c.is_open());
         assert_eq!(c.take_fault(), None);
@@ -296,7 +329,8 @@ mod tests {
         let mut c = capture(&b);
         c.start(&MicChoice::SystemDefault).unwrap();
         b.feed().push_native(&vec![0.1; 480], 48_000, 1);
-        b.feed().report_error(&CaptureError::new(CaptureErrorKind::DeviceChanged));
+        b.feed()
+            .report_error(&CaptureError::new(CaptureErrorKind::DeviceChanged));
         assert_eq!(c.take_fault(), None);
         assert!(c.is_open());
         // New default runs at 44.1 kHz stereo.

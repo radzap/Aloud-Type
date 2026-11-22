@@ -4,15 +4,18 @@
 //! only timer is the 3 second notice dismissal, alive only while the notice
 //! is on screen. The pure decisions live in `tray_model`.
 use crate::tray_model::{
-    self, double_click_command, menu, placeholder_icon_bgra, Command, IconKind, StartupAction, TrayState, TrayView,
-    NOTICE_DURATION_MS,
+    self, double_click_command, menu, placeholder_icon_bgra, Command, IconKind, StartupAction,
+    TrayState, TrayView, NOTICE_DURATION_MS,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-use crate::win32::{DispatchMessageW, GetMessageW, Hwnd, Msg, Point, SetForegroundWindow, ShowWindow, TranslateMessage};
+use crate::win32::{
+    DispatchMessageW, GetMessageW, Hwnd, Msg, Point, SetForegroundWindow, ShowWindow,
+    TranslateMessage,
+};
 
 const WM_DESTROY: u32 = 0x0002;
 const WM_CLOSE: u32 = 0x0010;
@@ -117,8 +120,18 @@ struct PaintStruct {
 extern "system" {
     fn RegisterClassW(c: *const WndClassW) -> u16;
     fn CreateWindowExW(
-        ex: u32, class: *const u16, title: *const u16, style: u32, x: i32, y: i32, w: i32, h: i32, parent: Hwnd,
-        menu: isize, instance: isize, param: *const u8,
+        ex: u32,
+        class: *const u16,
+        title: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        parent: Hwnd,
+        menu: isize,
+        instance: isize,
+        param: *const u8,
     ) -> Hwnd;
     fn DefWindowProcW(h: Hwnd, m: u32, w: usize, l: isize) -> isize;
     fn DestroyWindow(h: Hwnd) -> i32;
@@ -129,7 +142,15 @@ extern "system" {
     fn DestroyIcon(i: isize) -> i32;
     fn CreatePopupMenu() -> isize;
     fn AppendMenuW(m: isize, flags: u32, id: usize, text: *const u16) -> i32;
-    fn TrackPopupMenu(m: isize, flags: u32, x: i32, y: i32, r: i32, h: Hwnd, rect: *const Rect) -> i32;
+    fn TrackPopupMenu(
+        m: isize,
+        flags: u32,
+        x: i32,
+        y: i32,
+        r: i32,
+        h: Hwnd,
+        rect: *const Rect,
+    ) -> i32;
     fn DestroyMenu(m: isize) -> i32;
     fn GetCursorPos(p: *mut Point) -> i32;
     fn SetTimer(h: Hwnd, id: usize, ms: u32, f: usize) -> usize;
@@ -153,7 +174,14 @@ extern "system" {
 #[link(name = "shell32")]
 extern "system" {
     fn Shell_NotifyIconW(msg: u32, data: *const NotifyIconDataW) -> i32;
-    fn ShellExecuteW(h: Hwnd, op: *const u16, file: *const u16, params: *const u16, dir: *const u16, show: i32) -> isize;
+    fn ShellExecuteW(
+        h: Hwnd,
+        op: *const u16,
+        file: *const u16,
+        params: *const u16,
+        dir: *const u16,
+        show: i32,
+    ) -> isize;
 }
 #[link(name = "kernel32")]
 extern "system" {
@@ -204,7 +232,9 @@ impl TrayHandle {
         key_unavailable: bool,
         blocked_fault_standing: bool,
     ) {
-        self.inner.blocked.store(blocked_fault_standing, Ordering::SeqCst);
+        self.inner
+            .blocked
+            .store(blocked_fault_standing, Ordering::SeqCst);
         *self.inner.pending.lock().unwrap() = Some(tray_model::view(engine, key_unavailable));
         let h = self.inner.hwnd.load(Ordering::SeqCst);
         if h != 0 {
@@ -260,7 +290,13 @@ fn make_icon(kind: IconKind) -> isize {
     unsafe {
         let hc = CreateBitmap(SIZE as i32, SIZE as i32, 1, 32, color.as_ptr());
         let hm = CreateBitmap(SIZE as i32, SIZE as i32, 1, 1, mask.as_ptr());
-        let info = IconInfo { is_icon: 1, x_hotspot: 0, y_hotspot: 0, mask: hm, color: hc };
+        let info = IconInfo {
+            is_icon: 1,
+            x_hotspot: 0,
+            y_hotspot: 0,
+            mask: hm,
+            color: hc,
+        };
         let icon = CreateIconIndirect(&info);
         DeleteObject(hc);
         DeleteObject(hm);
@@ -310,7 +346,15 @@ fn show_menu(hwnd: Hwnd, blocked: bool) -> Option<Command> {
         GetCursorPos(&mut p);
         // Required so the menu dismisses when the user clicks elsewhere.
         SetForegroundWindow(hwnd);
-        let picked = TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_RETURNCMD, p.x, p.y, 0, hwnd, std::ptr::null());
+        let picked = TrackPopupMenu(
+            m,
+            TPM_RIGHTBUTTON | TPM_RETURNCMD,
+            p.x,
+            p.y,
+            0,
+            hwnd,
+            std::ptr::null(),
+        );
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(m);
         (picked > 0).then(|| items[picked as usize - 1].command)
@@ -343,8 +387,11 @@ unsafe extern "system" fn tray_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) ->
             let cmd = match l & 0xFFFF {
                 WM_LBUTTONDBLCLK => Some(double_click_command()),
                 WM_RBUTTONUP | WM_CONTEXTMENU => {
-                    let blocked = HOST
-                        .with(|h| h.borrow().as_ref().is_some_and(|h| h.handle.inner.blocked.load(Ordering::SeqCst)));
+                    let blocked = HOST.with(|h| {
+                        h.borrow()
+                            .as_ref()
+                            .is_some_and(|h| h.handle.inner.blocked.load(Ordering::SeqCst))
+                    });
                     show_menu(hwnd, blocked)
                 }
                 _ => None,
@@ -359,7 +406,11 @@ unsafe extern "system" fn tray_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) ->
             0
         }
         WM_APP_NOTICE => {
-            let text = HOST.with(|h| h.borrow().as_ref().and_then(|h| h.handle.inner.notice.lock().unwrap().take()));
+            let text = HOST.with(|h| {
+                h.borrow()
+                    .as_ref()
+                    .and_then(|h| h.handle.inner.notice.lock().unwrap().take())
+            });
             if let Some(t) = text {
                 show_notice(&t);
             }
@@ -426,8 +477,16 @@ unsafe extern "system" fn notice_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) 
             DeleteObject(brush);
             SetBkMode(dc, 1);
             SetTextColor(dc, 0x00F5_F5F5);
-            let text = HOST.with(|h| h.borrow().as_ref().map(|h| h.notice_text.clone())).unwrap_or_default();
-            DrawTextW(dc, text.as_ptr(), -1, &mut r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            let text = HOST
+                .with(|h| h.borrow().as_ref().map(|h| h.notice_text.clone()))
+                .unwrap_or_default();
+            DrawTextW(
+                dc,
+                text.as_ptr(),
+                -1,
+                &mut r,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
             EndPaint(hwnd, &ps);
             0
         }
@@ -442,7 +501,10 @@ unsafe extern "system" fn notice_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) 
     }
 }
 
-unsafe fn register(name: &str, proc_: unsafe extern "system" fn(Hwnd, u32, usize, isize) -> isize) -> Vec<u16> {
+unsafe fn register(
+    name: &str,
+    proc_: unsafe extern "system" fn(Hwnd, u32, usize, isize) -> isize,
+) -> Vec<u16> {
     let class = wide(name);
     let wc = WndClassW {
         style: 0,
@@ -525,7 +587,11 @@ pub fn run(
             return Err(std::io::Error::last_os_error());
         }
         handle.inner.hwnd.store(hwnd, Ordering::SeqCst);
-        let icons = [make_icon(IconKind::Idle), make_icon(IconKind::Listening), make_icon(IconKind::Fault)];
+        let icons = [
+            make_icon(IconKind::Idle),
+            make_icon(IconKind::Listening),
+            make_icon(IconKind::Fault),
+        ];
         let mut host = Host {
             handle: handle.clone(),
             commands: commands.clone(),
@@ -536,7 +602,13 @@ pub fn run(
             notice_text: Vec::new(),
         };
         // A state reported before the window existed wins over the initial one.
-        let first = handle.inner.pending.lock().unwrap().take().unwrap_or(initial);
+        let first = handle
+            .inner
+            .pending
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(initial);
         if let Some(v) = host.state.update(first) {
             apply_view(&mut host, hwnd, &v);
         }

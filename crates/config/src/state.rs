@@ -25,7 +25,11 @@ pub struct State {
 }
 
 fn sync_keys(t: &mut Table, keep: impl Fn(&str) -> bool) {
-    let stale: Vec<String> = t.iter().map(|(k, _)| k.to_string()).filter(|k| !keep(k)).collect();
+    let stale: Vec<String> = t
+        .iter()
+        .map(|(k, _)| k.to_string())
+        .filter(|k| !keep(k))
+        .collect();
     for k in stale {
         t.remove(&k);
     }
@@ -39,7 +43,8 @@ impl Schema for State {
     fn read(doc: &DocumentMut) -> Result<Self, String> {
         let mut s = State {
             first_run_complete: h::get_bool(doc, "first_run_complete")?.unwrap_or(false),
-            gpu_disabled_after_error: h::get_bool(doc, "gpu_disabled_after_error")?.unwrap_or(false),
+            gpu_disabled_after_error: h::get_bool(doc, "gpu_disabled_after_error")?
+                .unwrap_or(false),
             small_upgrade_started: h::get_bool(doc, "small_upgrade_started")?.unwrap_or(false),
             ..Default::default()
         };
@@ -47,13 +52,16 @@ impl Schema for State {
             let t = t.as_table().ok_or("`gpu_probes` must be a table")?;
             for (k, v) in t.iter() {
                 let e = v.as_table().ok_or("`gpu_probes` entries must be tables")?;
-                let approved =
-                    e.get("approved").and_then(Item::as_bool).ok_or("probe `approved` must be a bool")?;
+                let approved = e
+                    .get("approved")
+                    .and_then(Item::as_bool)
+                    .ok_or("probe `approved` must be a bool")?;
                 let speedup = e
                     .get("speedup")
                     .and_then(|i| i.as_float().or_else(|| i.as_integer().map(|n| n as f64)))
                     .ok_or("probe `speedup` must be a number")?;
-                s.gpu_probes.insert(k.to_string(), GpuProbe { approved, speedup });
+                s.gpu_probes
+                    .insert(k.to_string(), GpuProbe { approved, speedup });
             }
         }
         if let Some(t) = doc.get("downloads") {
@@ -71,7 +79,11 @@ impl Schema for State {
 
     fn write(&self, doc: &mut DocumentMut) {
         h::set_bool(doc, "first_run_complete", self.first_run_complete);
-        h::set_bool(doc, "gpu_disabled_after_error", self.gpu_disabled_after_error);
+        h::set_bool(
+            doc,
+            "gpu_disabled_after_error",
+            self.gpu_disabled_after_error,
+        );
         h::set_bool(doc, "small_upgrade_started", self.small_upgrade_started);
         let t = h::table(doc, "gpu_probes");
         sync_keys(t, |k| self.gpu_probes.contains_key(k));

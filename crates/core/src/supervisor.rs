@@ -86,7 +86,10 @@ pub fn run_supervised(
         if catch_unwind(AssertUnwindSafe(&mut body)).is_ok() {
             return true;
         }
-        let verdict = supervisor.lock().unwrap_or_else(|e| e.into_inner()).on_failure(worker);
+        let verdict = supervisor
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .on_failure(worker);
         match verdict {
             Verdict::Restart => report(Report::Restarted(worker)),
             Verdict::Fault(f) => {
@@ -123,12 +126,17 @@ mod tests {
         let sup = Mutex::new(Supervisor::new());
         let (mut runs, mut reports) = (0, vec![]);
         let ok = silent(|| {
-            run_supervised(&sup, Worker::Recognizer, || {
-                runs += 1;
-                if runs == 1 {
-                    panic!("boom");
-                }
-            }, |r| reports.push(r))
+            run_supervised(
+                &sup,
+                Worker::Recognizer,
+                || {
+                    runs += 1;
+                    if runs == 1 {
+                        panic!("boom");
+                    }
+                },
+                |r| reports.push(r),
+            )
         });
         assert!(ok);
         assert_eq!(runs, 2);
@@ -140,10 +148,15 @@ mod tests {
         let sup = Mutex::new(Supervisor::new());
         let (mut runs, mut reports) = (0, vec![]);
         let ok = silent(|| {
-            run_supervised(&sup, Worker::Audio, || {
-                runs += 1;
-                panic!("boom")
-            }, |r| reports.push(r))
+            run_supervised(
+                &sup,
+                Worker::Audio,
+                || {
+                    runs += 1;
+                    panic!("boom")
+                },
+                |r| reports.push(r),
+            )
         });
         assert!(!ok);
         assert_eq!(runs, 2);
@@ -151,7 +164,10 @@ mod tests {
             reports,
             vec![
                 Report::Restarted(Worker::Audio),
-                Report::Faulted(Worker::Audio, WorkerFault::Listening(FaultReason::MicrophoneError)),
+                Report::Faulted(
+                    Worker::Audio,
+                    WorkerFault::Listening(FaultReason::MicrophoneError)
+                ),
             ]
         );
     }
@@ -160,7 +176,9 @@ mod tests {
     fn recognizer_fault_is_a_typing_fault_with_a_message() {
         let mut s = Supervisor::new();
         assert_eq!(s.on_failure(Worker::Recognizer), Verdict::Restart);
-        let Verdict::Fault(f) = s.on_failure(Worker::Recognizer) else { panic!() };
+        let Verdict::Fault(f) = s.on_failure(Worker::Recognizer) else {
+            panic!()
+        };
         assert!(matches!(f, WorkerFault::Typing(_)));
         assert_eq!(f.message(), "Speech recognition stopped working");
     }

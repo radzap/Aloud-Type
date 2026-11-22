@@ -35,7 +35,13 @@ pub struct WinMics(Vec<(String, String)>);
 
 impl WinMics {
     pub fn new() -> Self {
-        Self(CpalBackend.list_inputs().into_iter().map(|d| (d.id, d.name)).collect())
+        Self(
+            CpalBackend
+                .list_inputs()
+                .into_iter()
+                .map(|d| (d.id, d.name))
+                .collect(),
+        )
     }
 }
 

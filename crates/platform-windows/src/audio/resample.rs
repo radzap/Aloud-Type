@@ -34,7 +34,8 @@ impl Resampler {
     /// Feed interleaved frames; returns the newly available 16 kHz mono samples.
     pub fn process(&mut self, interleaved: &[f32]) -> Vec<f32> {
         for frame in interleaved.chunks_exact(self.channels) {
-            self.pending.push(frame.iter().sum::<f32>() / self.channels as f32);
+            self.pending
+                .push(frame.iter().sum::<f32>() / self.channels as f32);
         }
         let mut out = Vec::new();
         loop {

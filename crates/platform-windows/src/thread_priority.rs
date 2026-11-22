@@ -35,6 +35,9 @@ mod tests {
         .unwrap();
         assert_eq!(lowered, -1);
         assert_eq!(current(), main_priority);
-        assert!(main_priority >= 0, "the test thread stays at normal or above");
+        assert!(
+            main_priority >= 0,
+            "the test thread stays at normal or above"
+        );
     }
 }
