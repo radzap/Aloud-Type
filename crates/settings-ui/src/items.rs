@@ -13,33 +13,109 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_URL: &str = "https://github.com/radzap/Aloud-Type/releases";
 pub const SOURCE_URL: &str = "https://github.com/radzap/Aloud-Type";
 
-/// Common Whisper languages offered for a fixed choice (code, name).
+/// Every language Whisper models take for a fixed choice (code, English name),
+/// sorted by name. Cantonese (`yue`) is left out: only the large-v3 models have
+/// a token for it, so the smaller models would decode garbage.
 pub const LANGUAGES: &[(&str, &str)] = &[
-    ("en", "English"),
-    ("es", "Spanish"),
-    ("fr", "French"),
-    ("de", "German"),
-    ("it", "Italian"),
-    ("pt", "Portuguese"),
-    ("nl", "Dutch"),
-    ("pl", "Polish"),
-    ("ru", "Russian"),
-    ("uk", "Ukrainian"),
-    ("cs", "Czech"),
-    ("sv", "Swedish"),
-    ("da", "Danish"),
-    ("no", "Norwegian"),
-    ("fi", "Finnish"),
-    ("el", "Greek"),
-    ("tr", "Turkish"),
-    ("he", "Hebrew"),
+    ("af", "Afrikaans"),
+    ("sq", "Albanian"),
+    ("am", "Amharic"),
     ("ar", "Arabic"),
-    ("hi", "Hindi"),
+    ("hy", "Armenian"),
+    ("as", "Assamese"),
+    ("az", "Azerbaijani"),
+    ("ba", "Bashkir"),
+    ("eu", "Basque"),
+    ("be", "Belarusian"),
+    ("bn", "Bengali"),
+    ("bs", "Bosnian"),
+    ("br", "Breton"),
+    ("bg", "Bulgarian"),
+    ("my", "Burmese"),
+    ("ca", "Catalan"),
     ("zh", "Chinese"),
-    ("ja", "Japanese"),
-    ("ko", "Korean"),
-    ("vi", "Vietnamese"),
+    ("hr", "Croatian"),
+    ("cs", "Czech"),
+    ("da", "Danish"),
+    ("nl", "Dutch"),
+    ("en", "English"),
+    ("et", "Estonian"),
+    ("fo", "Faroese"),
+    ("fi", "Finnish"),
+    ("fr", "French"),
+    ("gl", "Galician"),
+    ("ka", "Georgian"),
+    ("de", "German"),
+    ("el", "Greek"),
+    ("gu", "Gujarati"),
+    ("ht", "Haitian Creole"),
+    ("ha", "Hausa"),
+    ("haw", "Hawaiian"),
+    ("he", "Hebrew"),
+    ("hi", "Hindi"),
+    ("hu", "Hungarian"),
+    ("is", "Icelandic"),
     ("id", "Indonesian"),
+    ("it", "Italian"),
+    ("ja", "Japanese"),
+    ("jw", "Javanese"),
+    ("kn", "Kannada"),
+    ("kk", "Kazakh"),
+    ("km", "Khmer"),
+    ("ko", "Korean"),
+    ("lo", "Lao"),
+    ("la", "Latin"),
+    ("lv", "Latvian"),
+    ("ln", "Lingala"),
+    ("lt", "Lithuanian"),
+    ("lb", "Luxembourgish"),
+    ("mk", "Macedonian"),
+    ("mg", "Malagasy"),
+    ("ms", "Malay"),
+    ("ml", "Malayalam"),
+    ("mt", "Maltese"),
+    ("mi", "Maori"),
+    ("mr", "Marathi"),
+    ("mn", "Mongolian"),
+    ("ne", "Nepali"),
+    ("no", "Norwegian"),
+    ("nn", "Norwegian Nynorsk"),
+    ("oc", "Occitan"),
+    ("ps", "Pashto"),
+    ("fa", "Persian"),
+    ("pl", "Polish"),
+    ("pt", "Portuguese"),
+    ("pa", "Punjabi"),
+    ("ro", "Romanian"),
+    ("ru", "Russian"),
+    ("sa", "Sanskrit"),
+    ("sr", "Serbian"),
+    ("sn", "Shona"),
+    ("sd", "Sindhi"),
+    ("si", "Sinhala"),
+    ("sk", "Slovak"),
+    ("sl", "Slovenian"),
+    ("so", "Somali"),
+    ("es", "Spanish"),
+    ("su", "Sundanese"),
+    ("sw", "Swahili"),
+    ("sv", "Swedish"),
+    ("tl", "Tagalog"),
+    ("tg", "Tajik"),
+    ("ta", "Tamil"),
+    ("tt", "Tatar"),
+    ("te", "Telugu"),
+    ("th", "Thai"),
+    ("bo", "Tibetan"),
+    ("tr", "Turkish"),
+    ("tk", "Turkmen"),
+    ("uk", "Ukrainian"),
+    ("ur", "Urdu"),
+    ("uz", "Uzbek"),
+    ("vi", "Vietnamese"),
+    ("cy", "Welsh"),
+    ("yi", "Yiddish"),
+    ("yo", "Yoruba"),
 ];
 
 /// English-only Whisper models are named like `base.en-q5_1`.
@@ -445,8 +521,18 @@ mod tests {
     }
 
     #[test]
-    fn language_choices_include_english_and_codes_are_unique() {
-        assert_eq!(LANGUAGES[0].0, "en");
+    fn language_choices_are_sorted_by_name_and_codes_are_unique() {
+        let names: Vec<_> = LANGUAGES.iter().map(|l| l.1).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "sorted by name");
+        for code in ["en", "sk", "cs"] {
+            assert!(LANGUAGES.iter().any(|l| l.0 == code), "{code}");
+        }
+        assert!(
+            !LANGUAGES.iter().any(|l| l.0 == "yue"),
+            "Cantonese needs a large-v3 model"
+        );
         let mut c: Vec<_> = LANGUAGES.iter().map(|l| l.0).collect();
         c.sort();
         c.dedup();
