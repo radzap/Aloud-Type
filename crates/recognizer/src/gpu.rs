@@ -552,12 +552,16 @@ pub const DISPLAY_CLASS_KEY: &str =
 pub fn installed_adapters() -> Vec<GpuDevice> {
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         let out = Command::new("reg")
             // Only values whose name contains "Driver": the full subtree dump is megabytes of
             // driver data and took over a minute on an NVIDIA machine.
             .args(["query", DISPLAY_CLASS_KEY, "/s", "/v", "/f", "Driver"])
             .stdin(Stdio::null())
             .stderr(Stdio::null())
+            // reg.exe is a console program: without this, a console window flashes up at
+            // every model load because the app itself has no console.
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .output();
         match out {
             Ok(o) => parse_display_adapters(&String::from_utf8_lossy(&o.stdout)),
