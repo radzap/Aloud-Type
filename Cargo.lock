@@ -38,6 +38,7 @@ version = "0.1.0"
 name = "aloud-type-models"
 version = "0.1.0"
 dependencies = [
+ "aloud-type-config",
  "sha2",
  "tempfile",
 ]

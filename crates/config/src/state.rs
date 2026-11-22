@@ -18,6 +18,8 @@ pub struct State {
     pub gpu_probes: BTreeMap<String, GpuProbe>,
     /// GPU disabled after a backend error during a Dictation.
     pub gpu_disabled_after_error: bool,
+    /// The one-time switch to the Small model after a confirmed GPU was started.
+    pub small_upgrade_started: bool,
     /// Partial download bytes per model id.
     pub downloads: BTreeMap<String, u64>,
 }
@@ -38,6 +40,7 @@ impl Schema for State {
         let mut s = State {
             first_run_complete: h::get_bool(doc, "first_run_complete")?.unwrap_or(false),
             gpu_disabled_after_error: h::get_bool(doc, "gpu_disabled_after_error")?.unwrap_or(false),
+            small_upgrade_started: h::get_bool(doc, "small_upgrade_started")?.unwrap_or(false),
             ..Default::default()
         };
         if let Some(t) = doc.get("gpu_probes") {
@@ -69,6 +72,7 @@ impl Schema for State {
     fn write(&self, doc: &mut DocumentMut) {
         h::set_bool(doc, "first_run_complete", self.first_run_complete);
         h::set_bool(doc, "gpu_disabled_after_error", self.gpu_disabled_after_error);
+        h::set_bool(doc, "small_upgrade_started", self.small_upgrade_started);
         let t = h::table(doc, "gpu_probes");
         sync_keys(t, |k| self.gpu_probes.contains_key(k));
         for (k, p) in &self.gpu_probes {

@@ -356,3 +356,30 @@ fn a_changed_tap_threshold_and_key_kind_apply_to_the_next_press() {
     r.release();
     assert!(r.cap.is_open(), "600 ms is a tap under a 1000 ms threshold, so it went hands-free");
 }
+
+#[test]
+fn an_idle_controller_asks_for_no_polling_and_an_active_one_does() {
+    let mut r = rig(vec!["hello"]);
+    r.c.step();
+    assert_eq!(r.c.poll_interval(), None, "nothing is pending: the worker may sleep until woken");
+    r.press();
+    assert!(r.c.poll_interval().is_some(), "key down: timers and audio need servicing");
+    r.clock.advance(300);
+    r.speak(200);
+    assert!(r.c.poll_interval().is_some());
+    r.release();
+    assert_eq!(r.c.poll_interval(), None, "back to idle once the Dictation is over");
+}
+
+#[test]
+fn a_lingering_fault_keeps_polling_until_it_is_gone() {
+    let mut r = rig(vec![]);
+    r.cap.fail_start(FaultReason::NoMicrophone);
+    r.press();
+    r.clock.advance(300);
+    r.release();
+    assert!(r.c.poll_interval().is_some(), "the red overlay is still timing out");
+    r.wait(2100);
+    assert_eq!(r.c.indicator(), Indicator::Hidden);
+    assert_eq!(r.c.poll_interval(), None);
+}

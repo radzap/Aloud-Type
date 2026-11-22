@@ -57,16 +57,19 @@ extern "system" {
     fn GetModuleHandleW(n: *const u16) -> isize;
 }
 
+type Notify = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 thread_local! {
-    static TX: std::cell::RefCell<Option<Sender<PowerEvent>>> = const { std::cell::RefCell::new(None) };
+    static TX: std::cell::RefCell<Option<(Sender<PowerEvent>, Notify)>> = const { std::cell::RefCell::new(None) };
 }
 
 unsafe extern "system" fn proc_(h: Hwnd, m: u32, w: usize, l: isize) -> isize {
     if m == WM_POWERBROADCAST {
         if let Some(e) = map_power_broadcast(w) {
             TX.with(|t| {
-                if let Some(t) = t.borrow().as_ref() {
+                if let Some((t, notify)) = t.borrow().as_ref() {
                     let _ = t.send(e);
+                    notify();
                 }
             });
         }
@@ -82,10 +85,15 @@ pub struct PowerWatcher {
 
 impl PowerWatcher {
     pub fn start() -> std::io::Result<Self> {
+        Self::start_notifying(std::sync::Arc::new(|| {}))
+    }
+
+    /// Like `start`, calling `notify` after each power event is queued.
+    pub fn start_notifying(notify: Notify) -> std::io::Result<Self> {
         let (tx, rx) = channel();
         let (ready_tx, ready_rx) = channel::<Hwnd>();
         std::thread::spawn(move || unsafe {
-            TX.with(|t| *t.borrow_mut() = Some(tx));
+            TX.with(|t| *t.borrow_mut() = Some((tx, notify)));
             let name: Vec<u16> = "AloudTypePower\0".encode_utf16().collect();
             let inst = GetModuleHandleW(std::ptr::null());
             let wc = WndClassW {

@@ -12,7 +12,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 type Hhook = isize;
+/// Called after the hook posts an event or its health changes, so a sleeping host wakes.
+pub type Notify = Arc<dyn Fn() + Send + Sync>;
 const WH_KEYBOARD_LL: i32 = 13;
+/// How often the hook thread wakes to check the hook is still installed.
+const WATCHDOG_TICK_MS: u32 = 5000;
 const WM_TIMER: u32 = 0x0113;
 const WM_QUIT: u32 = 0x0012;
 const WM_APP: u32 = 0x8000;
@@ -62,6 +66,7 @@ struct CbState {
     classifier: Classifier,
     events: Sender<KeyEvent>,
     inject: Sender<Vec<Inject>>,
+    notify: Notify,
 }
 
 thread_local! {
@@ -85,6 +90,7 @@ unsafe extern "system" fn callback(code: i32, w: usize, l: isize) -> isize {
                     let d = st.classifier.process(raw);
                     if let Some(e) = d.post {
                         let _ = st.events.send(e);
+                        (st.notify)();
                     }
                     if !d.inject.is_empty() {
                         let _ = st.inject.send(d.inject);
@@ -162,6 +168,11 @@ pub struct KeyboardHook {
 
 impl KeyboardHook {
     pub fn start(cfg: HookConfig) -> Result<Self, String> {
+        Self::start_notifying(cfg, Arc::new(|| {}))
+    }
+
+    /// Like `start`, calling `notify` whenever an event is posted or the hook's health changes.
+    pub fn start_notifying(cfg: HookConfig, notify: Notify) -> Result<Self, String> {
         let (ev_tx, ev_rx) = channel();
         let (inj_tx, inj_rx) = channel::<Vec<Inject>>();
         std::thread::spawn(move || {
@@ -178,14 +189,15 @@ impl KeyboardHook {
         let (ready_tx, ready_rx) = channel::<Result<u32, String>>();
         std::thread::spawn(move || {
             STATE.with(|s| {
-                *s.borrow_mut() = Some(CbState { classifier: Classifier::new(cfg.dictation_vk), events: ev_tx, inject: inj_tx })
+                *s.borrow_mut() = Some(CbState { classifier: Classifier::new(cfg.dictation_vk), events: ev_tx, inject: inj_tx, notify: notify.clone() })
             });
             if !install() {
                 let _ = ready_tx.send(Err("SetWindowsHookExW failed".into()));
                 return;
             }
             let _ = ready_tx.send(Ok(unsafe { GetCurrentThreadId() }));
-            unsafe { SetTimer(0, 1, 1000, 0) };
+            // Watchdog tick: slow on purpose, an idle app should hardly wake at all.
+            unsafe { SetTimer(0, 1, WATCHDOG_TICK_MS.min(cfg.watchdog_interval.as_millis() as u32), 0) };
             let started = Instant::now();
             let mut last_install = 0u64;
             let mut msg = Msg::default();
@@ -198,6 +210,7 @@ impl KeyboardHook {
                             uninstall();
                             let ok = install();
                             thread_health.record_install(ok);
+                            notify();
                             if ok {
                                 counter.fetch_add(1, Ordering::Relaxed);
                             }
@@ -208,6 +221,7 @@ impl KeyboardHook {
                         uninstall();
                         let ok = install();
                         thread_health.record_install(ok);
+                        notify();
                         if ok {
                             counter.fetch_add(1, Ordering::Relaxed);
                         }

@@ -1,6 +1,7 @@
 //! The Speech model lineup and the rule that only verified files are loaded.
 //! No network code lives here: downloads belong to the Settings process, the
 //! resident process only calls [`verified_path`].
+use aloud_type_config::{Gpu, Settings, State, DEFAULT_SPEECH_MODEL};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::io::{self, Read};
@@ -49,6 +50,21 @@ pub const CATALOG: &[ModelInfo] = &[
     model!("large-v3-turbo-q5_0", "Large v3 turbo (needs a GPU)", "ggml-large-v3-turbo-q5_0.bin", 574_041_195,
         "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", false),
 ];
+
+/// The Silero voice-activity model that keeps silence away from Whisper. Not
+/// a choice in Settings: it is fetched alongside the Speech model.
+pub const VAD_MODEL: ModelInfo = ModelInfo {
+    id: "silero-vad",
+    label: "Voice activity detector",
+    file: "ggml-silero-v5.1.2.bin",
+    url: "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin",
+    size: 885_098,
+    sha256: "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
+    english_only: false,
+};
+
+/// The model that becomes the default once a GPU is confirmed.
+pub const GPU_DEFAULT_MODEL: &str = "small-q5_1";
 
 /// The one-click first-run model (also the Settings default).
 pub const FIRST_RUN_MODEL: &str = "base-q5_1";
@@ -123,6 +139,40 @@ pub fn setup_complete(dir: &Path) -> bool {
     CATALOG.iter().any(|m| is_installed(dir, m))
 }
 
+/// Downloads the resident process should have the Settings program do in the
+/// background (the resident process itself never touches the network).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BackgroundWork {
+    /// The voice-activity model is missing.
+    pub vad: bool,
+    /// A GPU is confirmed: fetch the Small model and make it the default.
+    pub small_default: bool,
+}
+
+impl BackgroundWork {
+    pub fn any(self) -> bool {
+        self.vad || self.small_default
+    }
+}
+
+/// What background downloading is due. Nothing before first run completes.
+pub fn background_work(settings: &Settings, state: &State, dir: &Path) -> BackgroundWork {
+    if !setup_complete(dir) {
+        return BackgroundWork::default();
+    }
+    let gpu_confirmed = settings.gpu != Gpu::CpuOnly
+        && !state.gpu_disabled_after_error
+        && state.gpu_probes.values().any(|p| p.approved);
+    let small = find(GPU_DEFAULT_MODEL).expect("small model is in the catalog");
+    BackgroundWork {
+        vad: !is_installed(dir, &VAD_MODEL),
+        small_default: gpu_confirmed
+            && settings.speech_model == DEFAULT_SPEECH_MODEL
+            && !state.small_upgrade_started
+            && !is_installed(dir, small),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,5 +229,67 @@ mod tests {
             assert_eq!(m.english_only, m.id.contains(".en"), "{}", m.id);
         }
         assert_eq!(CATALOG[0].id, FIRST_RUN_MODEL);
+    }
+
+    fn installed_base(dir: &Path) {
+        let m = find(FIRST_RUN_MODEL).unwrap();
+        std::fs::File::create(model_path(dir, m)).unwrap().set_len(m.size).unwrap();
+    }
+
+    fn confirmed_gpu() -> State {
+        let mut st = State::default();
+        st.gpu_probes.insert("RTX 4060|31.0.1".into(), aloud_type_config::GpuProbe { approved: true, speedup: 3.0 });
+        st
+    }
+
+    #[test]
+    fn vad_model_is_well_formed_and_not_a_settings_choice() {
+        assert_eq!(VAD_MODEL.sha256.len(), 64);
+        assert!(VAD_MODEL.url.ends_with(VAD_MODEL.file));
+        assert!(CATALOG.iter().all(|m| m.id != VAD_MODEL.id));
+    }
+
+    #[test]
+    fn nothing_downloads_in_the_background_before_first_run_is_complete() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(background_work(&Settings::default(), &confirmed_gpu(), d.path()), BackgroundWork::default());
+    }
+
+    #[test]
+    fn a_missing_voice_model_is_fetched_once_a_speech_model_is_installed() {
+        let d = tempfile::tempdir().unwrap();
+        installed_base(d.path());
+        let w = background_work(&Settings::default(), &State::default(), d.path());
+        assert_eq!(w, BackgroundWork { vad: true, small_default: false });
+        std::fs::File::create(model_path(d.path(), &VAD_MODEL)).unwrap().set_len(VAD_MODEL.size).unwrap();
+        assert!(!background_work(&Settings::default(), &State::default(), d.path()).any());
+    }
+
+    #[test]
+    fn small_becomes_the_default_only_with_a_confirmed_gpu_the_default_model_and_no_earlier_attempt() {
+        let d = tempfile::tempdir().unwrap();
+        installed_base(d.path());
+        let due = |s: &Settings, st: &State| background_work(s, st, d.path()).small_default;
+        assert!(due(&Settings::default(), &confirmed_gpu()));
+        assert!(!due(&Settings::default(), &State::default()), "no confirmed GPU");
+        let unapproved = {
+            let mut st = State::default();
+            st.gpu_probes.insert("x|1".into(), aloud_type_config::GpuProbe { approved: false, speedup: 0.5 });
+            st
+        };
+        assert!(!due(&Settings::default(), &unapproved));
+        let cpu_only = Settings { gpu: Gpu::CpuOnly, ..Settings::default() };
+        assert!(!due(&cpu_only, &confirmed_gpu()), "user chose CPU only");
+        let chose = Settings { speech_model: "base.en-q5_1".into(), ..Settings::default() };
+        assert!(!due(&chose, &confirmed_gpu()), "the user's own model choice stands");
+        let mut errored = confirmed_gpu();
+        errored.gpu_disabled_after_error = true;
+        assert!(!due(&Settings::default(), &errored));
+        let mut tried = confirmed_gpu();
+        tried.small_upgrade_started = true;
+        assert!(!due(&Settings::default(), &tried), "offered once");
+        let small = find(GPU_DEFAULT_MODEL).unwrap();
+        std::fs::File::create(model_path(d.path(), small)).unwrap().set_len(small.size).unwrap();
+        assert!(!due(&Settings::default(), &confirmed_gpu()), "already installed");
     }
 }

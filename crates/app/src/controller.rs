@@ -9,6 +9,10 @@ use crate::residency::Residency;
 use aloud_type_core::{Clock, Keyboard, Recognizer, VoiceGate};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
+
+/// How often `step()` must run while a Dictation, key press or fault is live.
+pub const ACTIVE_POLL: Duration = Duration::from_millis(20);
 
 /// Which microphone to open.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -203,6 +207,15 @@ impl<K: Keyboard, C: Clock + Clone> Controller<K, C> {
     }
     pub fn dictating(&self) -> bool {
         self.session.is_some()
+    }
+
+    /// When `step()` next needs to run on its own. `None` means nothing is
+    /// pending: the host sleeps until a key, command or load wakes it.
+    pub fn poll_interval(&self) -> Option<Duration> {
+        if self.session.is_some() || self.engine.phase() != Phase::Idle || self.monitor.indicator() != Indicator::Hidden {
+            return Some(ACTIVE_POLL);
+        }
+        self.residency.as_ref().and_then(|r| r.idle_unload_in()).map(|ms| Duration::from_millis(ms.max(1)))
     }
 
     /// Advance the whole app by one tick.

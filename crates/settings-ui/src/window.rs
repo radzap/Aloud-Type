@@ -10,7 +10,7 @@ use crate::session::RebindSession;
 use aloud_type_config::{AppPaths, ConfigFile};
 use crate::items_view::{ItemsMsg, ItemsPanel};
 use crate::items_win::{WinLogin, WinMics};
-use aloud_type_models::find;
+use aloud_type_models::{find, is_installed, VAD_MODEL};
 use iced::widget::{button, column, row, scrollable, text};
 use iced::{keyboard, Element, Subscription, Task};
 use std::sync::{Arc, Mutex};
@@ -99,6 +99,10 @@ impl App {
                 g.done = d;
                 g.total = t;
             });
+            if r.is_ok() && !is_installed(&dir, &VAD_MODEL) {
+                // The voice detector rides along; the speech model works without it.
+                let _ = download_model(&VAD_MODEL, &dir, &mut UreqHttp::default(), &mut |_, _| {});
+            }
             shared.lock().unwrap().result = Some(r);
         });
         tick_after_millis(300, Message::DownloadTick)
