@@ -8,7 +8,7 @@ from pathlib import PurePosixPath, Path
 NETWORK_CRATES = {"ureq", "ureq-proto", "native-tls", "reqwest", "hyper", "curl", "isahc", "attohttpc",
                   "minreq", "tungstenite", "tokio-tungstenite", "surf", "rustls", "openssl", "schannel"}
 # Only the model downloader may use an HTTP client.
-CLIENT_ALLOWED = {"crates/settings-ui/src/download.rs"}
+CLIENT_ALLOWED = {"crates/settings-ui/src/download.rs", "crates/settings-ui/src/update.rs"}
 CLIENT_RE = re.compile(r"\bureq\b|\breqwest\b|\bhyper::|native_tls|\bwinhttp\b|\bwininet\b|WinHttp|InternetOpen", re.I)
 SOCKET_RE = re.compile(r"TcpStream|TcpListener|UdpSocket|ToSocketAddrs|WSAStartup|\bconnect\(\s*socket")
 URL_RE = re.compile(r"https?://[^\s\"')>]+")
@@ -17,8 +17,11 @@ URL_ALLOWED_PREFIXES = {
     "crates/models/src/lib.rs": ("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/",
                                  "https://huggingface.co/ggml-org/whisper-vad/resolve/main/"),
     "crates/settings-ui/src/items.rs": ("https://github.com/radzap/Aloud-Type",),
+    # Manual "Check for updates" button in Settings (user-initiated, never automatic).
+    "crates/settings-ui/src/update.rs": ("https://api.github.com/repos/radzap/Aloud-Type/releases/latest",),
 }
 UPDATE_RE = re.compile(r"releases/latest|/update|check[_-]?for[_-]?update", re.I)
+UPDATE_ALLOWED = {"crates/settings-ui/src/update.rs"}
 SKIP_DIRS = {"tests", "target", ".git", "examples"}
 
 
@@ -40,7 +43,7 @@ def scan_sources(root):
             if CLIENT_RE.search(line) and rel not in CLIENT_ALLOWED:
                 findings.append(f"{where}: HTTP client outside the model downloader: {line.strip()}")
             for url in URL_RE.findall(line):
-                if not url.startswith(URL_ALLOWED_PREFIXES.get(rel, ())) or UPDATE_RE.search(url):
+                if not url.startswith(URL_ALLOWED_PREFIXES.get(rel, ())) or (UPDATE_RE.search(url) and rel not in UPDATE_ALLOWED):
                     findings.append(f"{where}: URL not on the allow list: {url}")
     return findings
 

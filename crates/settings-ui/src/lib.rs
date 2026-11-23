@@ -12,5 +12,6 @@ pub mod keys;
 pub mod manager;
 pub mod rules;
 pub mod session;
+pub mod update;
 mod window;
 pub use window::{run, HELP_LINE};

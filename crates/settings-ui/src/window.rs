@@ -192,6 +192,13 @@ impl App {
                 };
                 self.apply(st);
             }
+            Message::Items(ItemsMsg::CheckUpdate) => {
+                self.items.update(ItemsMsg::CheckUpdate);
+                return Task::perform(
+                    async { crate::update::check(crate::items::VERSION) },
+                    |st| Message::Items(ItemsMsg::UpdateChecked(st)),
+                );
+            }
             Message::Items(m) => {
                 if self.items.update(m) {
                     return tick_after_millis(1000, Message::GpuTick);
@@ -368,7 +375,7 @@ pub fn run() -> iced::Result {
         .title("Aloud Type Settings")
         .subscription(App::subscription)
         .window(window::Settings {
-            size: Size::new(940.0, 640.0),
+            size: Size::new(940.0, 710.0),
             min_size: Some(Size::new(760.0, 480.0)),
             icon: app_icon(),
             ..window::Settings::default()

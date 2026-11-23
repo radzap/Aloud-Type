@@ -12,6 +12,7 @@ use iced::alignment::Vertical::Center;
 use iced::widget::{button, checkbox, column, container, pick_list, row, space, text, toggler};
 use iced::Length::Fill;
 use iced::{font, Element, Font};
+use crate::update::UpdateStatus;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,10 +45,13 @@ pub enum ItemsMsg {
     Gpu(Choice<Gpu>),
     RetestGpu,
     OpenLink(&'static str),
+    CheckUpdate,
+    UpdateChecked(UpdateStatus),
 }
 
 pub struct ItemsPanel<L: LoginItem, M: MicLister> {
     session: ItemsSession<PipeClient, L, M>,
+    update: UpdateStatus,
 }
 
 impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
@@ -55,6 +59,7 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
         // The state file sits next to the settings file; Settings only reads it.
         let state = ConfigFile::<State>::open(config.path().with_file_name("state.toml"));
         Self {
+            update: UpdateStatus::Idle,
             session: ItemsSession::new(config, PipeClient::default(), login, mics)
                 .with_state(state),
         }
@@ -91,6 +96,8 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             ItemsMsg::Memory(c) => self.session.set_model_memory(c.value),
             ItemsMsg::Login(on) => self.session.set_launch_at_login(on),
             ItemsMsg::OpenLink(url) => open_link(url),
+            ItemsMsg::CheckUpdate => self.update = UpdateStatus::Checking,
+            ItemsMsg::UpdateChecked(st) => self.update = st,
         }
         gpu_work
     }
@@ -260,6 +267,25 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             .align_y(Center),
         ]
         .spacing(10);
+        let checking = self.update == UpdateStatus::Checking;
+        let mut check = row![button(text(if checking { "Checking..." } else { "Check for updates" }).size(13))
+            .style(button::secondary)
+            .on_press_maybe((!checking).then_some(ItemsMsg::CheckUpdate))]
+        .spacing(8)
+        .align_y(Center);
+        match &self.update {
+            UpdateStatus::UpToDate => check = check.push(muted("You have the latest version.")),
+            UpdateStatus::Failed => check = check.push(muted("Could not check for updates.")),
+            UpdateStatus::Available(tag) => {
+                check = check.push(muted(format!("New version available: {tag}")));
+                check = check.push(
+                    button(text("Open latest release").size(13))
+                        .on_press(ItemsMsg::OpenLink(RELEASES_URL)),
+                );
+            }
+            _ => {}
+        }
+        col = col.push(check);
         if let Some(e) = self.session.error() {
             col = col.push(
                 text(format!("Could not save: {e}"))
