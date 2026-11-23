@@ -21,6 +21,7 @@ fn defaults_match_the_spec() {
     assert_eq!(s.indicator_horizontal, HorizontalPosition::Center);
     assert_eq!(s.model_memory, ModelMemory::KeepLoaded);
     assert_eq!(s.language, Language::Fixed("en".into()));
+    assert!(!s.language_from_keyboard);
     assert!(!s.launch_at_login);
     assert_eq!(s.gpu, Gpu::Auto);
     assert_eq!(s.tap_threshold_ms, 250);
@@ -35,6 +36,7 @@ fn settings_round_trip_through_a_new_open() {
         s.dictation_key = vec!["LeftCtrl".into(), "F9".into()];
         s.microphone = Some("USB Mic".into());
         s.language = Language::Auto;
+        s.language_from_keyboard = true;
         s.gpu = Gpu::Device("NVIDIA".into());
         s.model_memory = ModelMemory::UnloadWhenIdle;
         s.launch_at_login = true;

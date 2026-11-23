@@ -56,10 +56,11 @@ const SM_CYSCREEN: i32 = 1;
 const DT_CENTER: u32 = 1;
 const DT_VCENTER: u32 = 4;
 const DT_SINGLELINE: u32 = 0x20;
+const DT_END_ELLIPSIS: u32 = 0x8000;
 const HTTRANSPARENT: isize = -1;
 const MA_NOACTIVATE: isize = 3;
 const NOTICE_TIMER: usize = 1;
-const NOTICE_W: i32 = 440;
+const NOTICE_W: i32 = 560;
 const NOTICE_H: i32 = 56;
 
 #[repr(C)]
@@ -498,7 +499,7 @@ unsafe extern "system" fn notice_proc(hwnd: Hwnd, msg: u32, w: usize, l: isize) 
                 text.as_ptr(),
                 -1,
                 &mut r,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
             EndPaint(hwnd, &ps);
             0
@@ -627,6 +628,7 @@ pub fn run(
         match startup {
             StartupAction::Notice(text) => show_notice(&text),
             StartupAction::OpenSettings => {
+                show_notice(tray_model::FIRST_RUN_NOTICE);
                 let _ = commands.send(Command::OpenSettings);
             }
         }

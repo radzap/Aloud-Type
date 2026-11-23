@@ -32,110 +32,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const RELEASES_URL: &str = "https://github.com/radzap/Aloud-Type/releases";
 pub const SOURCE_URL: &str = "https://github.com/radzap/Aloud-Type";
 
-/// Every language Whisper models take for a fixed choice (code, English name),
-/// sorted by name. Cantonese (`yue`) is left out: only the large-v3 models have
-/// a token for it, so the smaller models would decode garbage.
-pub const LANGUAGES: &[(&str, &str)] = &[
-    ("af", "Afrikaans"),
-    ("sq", "Albanian"),
-    ("am", "Amharic"),
-    ("ar", "Arabic"),
-    ("hy", "Armenian"),
-    ("as", "Assamese"),
-    ("az", "Azerbaijani"),
-    ("ba", "Bashkir"),
-    ("eu", "Basque"),
-    ("be", "Belarusian"),
-    ("bn", "Bengali"),
-    ("bs", "Bosnian"),
-    ("br", "Breton"),
-    ("bg", "Bulgarian"),
-    ("my", "Burmese"),
-    ("ca", "Catalan"),
-    ("zh", "Chinese"),
-    ("hr", "Croatian"),
-    ("cs", "Czech"),
-    ("da", "Danish"),
-    ("nl", "Dutch"),
-    ("en", "English"),
-    ("et", "Estonian"),
-    ("fo", "Faroese"),
-    ("fi", "Finnish"),
-    ("fr", "French"),
-    ("gl", "Galician"),
-    ("ka", "Georgian"),
-    ("de", "German"),
-    ("el", "Greek"),
-    ("gu", "Gujarati"),
-    ("ht", "Haitian Creole"),
-    ("ha", "Hausa"),
-    ("haw", "Hawaiian"),
-    ("he", "Hebrew"),
-    ("hi", "Hindi"),
-    ("hu", "Hungarian"),
-    ("is", "Icelandic"),
-    ("id", "Indonesian"),
-    ("it", "Italian"),
-    ("ja", "Japanese"),
-    ("jw", "Javanese"),
-    ("kn", "Kannada"),
-    ("kk", "Kazakh"),
-    ("km", "Khmer"),
-    ("ko", "Korean"),
-    ("lo", "Lao"),
-    ("la", "Latin"),
-    ("lv", "Latvian"),
-    ("ln", "Lingala"),
-    ("lt", "Lithuanian"),
-    ("lb", "Luxembourgish"),
-    ("mk", "Macedonian"),
-    ("mg", "Malagasy"),
-    ("ms", "Malay"),
-    ("ml", "Malayalam"),
-    ("mt", "Maltese"),
-    ("mi", "Maori"),
-    ("mr", "Marathi"),
-    ("mn", "Mongolian"),
-    ("ne", "Nepali"),
-    ("no", "Norwegian"),
-    ("nn", "Norwegian Nynorsk"),
-    ("oc", "Occitan"),
-    ("ps", "Pashto"),
-    ("fa", "Persian"),
-    ("pl", "Polish"),
-    ("pt", "Portuguese"),
-    ("pa", "Punjabi"),
-    ("ro", "Romanian"),
-    ("ru", "Russian"),
-    ("sa", "Sanskrit"),
-    ("sr", "Serbian"),
-    ("sn", "Shona"),
-    ("sd", "Sindhi"),
-    ("si", "Sinhala"),
-    ("sk", "Slovak"),
-    ("sl", "Slovenian"),
-    ("so", "Somali"),
-    ("es", "Spanish"),
-    ("su", "Sundanese"),
-    ("sw", "Swahili"),
-    ("sv", "Swedish"),
-    ("tl", "Tagalog"),
-    ("tg", "Tajik"),
-    ("ta", "Tamil"),
-    ("tt", "Tatar"),
-    ("te", "Telugu"),
-    ("th", "Thai"),
-    ("bo", "Tibetan"),
-    ("tr", "Turkish"),
-    ("tk", "Turkmen"),
-    ("uk", "Ukrainian"),
-    ("ur", "Urdu"),
-    ("uz", "Uzbek"),
-    ("vi", "Vietnamese"),
-    ("cy", "Welsh"),
-    ("yi", "Yiddish"),
-    ("yo", "Yoruba"),
-];
+pub use aloud_type_models::languages::LANGUAGES;
 
 /// English-only Whisper models are named like `base.en-q5_1`.
 pub fn is_english_only(model: &str) -> bool {
@@ -294,6 +191,16 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
         }
     }
 
+    /// Keep re-reading the state file for a while: at the first launch the resident process
+    /// saves the GPUs just after Settings opens, and a finished download loads the model.
+    /// True when the window should start polling (it was not already).
+    pub fn watch_gpu(&mut self) -> bool {
+        let polling = self.gpu_test_until.is_some() || self.gpu_watch_until.is_some();
+        let until = Instant::now() + GPU_WATCH;
+        self.gpu_watch_until = Some(self.gpu_watch_until.map_or(until, |u| u.max(until)));
+        !polling
+    }
+
     /// Re-read the state file. True while a test runs or a GPU change is still settling, so
     /// the window keeps polling.
     pub fn poll_gpu(&mut self) -> bool {
@@ -388,6 +295,13 @@ impl<T: Transport, L: LoginItem, M: MicLister> ItemsSession<T, L, M> {
     pub fn set_language(&mut self, language: Language) {
         if self.language_enabled() {
             self.save(|s| s.language = language);
+        }
+    }
+
+    /// Multilingual models only: dictate in the keyboard layout's language.
+    pub fn set_language_from_keyboard(&mut self, on: bool) {
+        if self.language_enabled() {
+            self.save(|s| s.language_from_keyboard = on);
         }
     }
 
@@ -576,6 +490,36 @@ mod tests {
         assert!(s.language_enabled());
         s.set_language(Language::Fixed("cs".into()));
         assert_eq!(reread(&p).language, Language::Fixed("cs".into()));
+    }
+
+    #[test]
+    fn keyboard_language_is_saved_for_multilingual_models_only() {
+        let (mut s, fake, _d, p) = session(Login::default());
+        s.set_language_from_keyboard(true);
+        assert!(reread(&p).language_from_keyboard);
+        assert_eq!(fake.log.borrow().last().unwrap(), "reload-settings");
+        s.set_language_from_keyboard(false);
+        s.config
+            .update(|x| x.speech_model = "base.en-q5_1".into())
+            .unwrap();
+        s.set_language_from_keyboard(true);
+        assert!(!reread(&p).language_from_keyboard);
+    }
+
+    #[test]
+    fn gpus_saved_after_settings_opened_show_up_while_watching() {
+        let (s, _fake, d, _p) = session(Login::default());
+        let sp = d.path().join("state.toml");
+        let mut s = s.with_state(ConfigFile::open(&sp));
+        assert!(!s.has_gpus());
+        assert!(s.watch_gpu(), "starts polling");
+        assert!(!s.watch_gpu(), "already polling");
+        ConfigFile::<State>::open(&sp)
+            .update(|x| x.gpu_adapters = vec!["RTX 4060".into()])
+            .unwrap();
+        assert!(s.poll_gpu());
+        assert!(s.has_gpus());
+        assert_eq!(s.gpu_options().last().unwrap().1, "RTX 4060");
     }
 
     #[test]

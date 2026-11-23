@@ -74,6 +74,7 @@ mod host {
     use aloud_type_platform_windows::inject::{check_can_start, FaultSlot, InjectingSink};
     use aloud_type_platform_windows::inject_win::{ForegroundElevation, SendInputBackend};
     use aloud_type_platform_windows::instance::{self, Launch};
+    use aloud_type_platform_windows::keyboard_layout;
     use aloud_type_platform_windows::overlay::{self, OverlayHandle};
     use aloud_type_platform_windows::overlay_model::{Placement, Style};
     use aloud_type_platform_windows::pipe_server::PipeServer;
@@ -430,6 +431,13 @@ mod host {
                 Ok(Box::new(m) as Model)
             })
         };
+        if !setup_complete(&paths) {
+            // First launch: no model loads yet, so save the GPUs for Settings now.
+            aloud_type_recognizer::gpu::save_adapters(
+                &paths.state_file(),
+                &aloud_type_recognizer::gpu::installed_adapters(),
+            );
+        }
         let started = Instant::now();
         let residency = Residency::start(
             loader,
@@ -540,7 +548,15 @@ mod host {
             sink: Box::new(sink),
             start_gate: Box::new(ElevatedGate),
             typing_faults: Box::new(SlotFaults(fault_slot)),
-            settings: Box::new(move || dictation.borrow().clone()),
+            // Read when the Dictation key is pressed: the keyboard layout in use right then.
+            settings: Box::new(move || {
+                let mut d = dictation.borrow().clone();
+                if d.language_from_keyboard {
+                    let locale = keyboard_layout::focused_keyboard_locale();
+                    d.language = dictation_language(&d, locale.as_deref());
+                }
+                d
+            }),
             config: ControllerConfig::default(),
         });
         c.set_residency(residency.clone());
@@ -596,6 +612,10 @@ mod host {
                 recheck_downloads |= loaded.is_some();
                 *last_loaded.borrow_mut() = loaded;
             }
+            if recheck_downloads && setup_complete(&paths) {
+                // The first Speech model may have just been downloaded.
+                residency.retry_failed();
+            }
             if recheck_downloads {
                 let mut bg = background.borrow_mut();
                 bg.0.rearm();
@@ -610,8 +630,19 @@ mod host {
                 c.set_lifecycle(l);
             }
             c.step();
-            for n in residency.take_notices() {
-                tray.notify(&n);
+            let notices = residency.take_notices();
+            // Before setup a load can only fail; the first-launch notice already said why.
+            if !notices.is_empty() && setup_complete(&paths) {
+                for n in notices {
+                    tray.notify(&n);
+                }
+            }
+            for id in residency.take_ready() {
+                let state = ConfigFile::<State>::open(paths.state_file());
+                tray.notify(&model_ready_notice(
+                    &id,
+                    state.value().gpu_in_use.as_deref(),
+                ));
             }
             if let Some(p) = &power {
                 while let Ok(e) = p.events.try_recv() {

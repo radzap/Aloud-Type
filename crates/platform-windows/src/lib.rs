@@ -14,6 +14,8 @@ pub mod inject_win;
 #[cfg(windows)]
 pub mod instance;
 #[cfg(windows)]
+pub mod keyboard_layout;
+#[cfg(windows)]
 pub mod overlay;
 pub mod overlay_model;
 #[cfg(windows)]

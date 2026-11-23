@@ -26,6 +26,8 @@ struct State {
     dictating: bool,
     last_activity: Millis,
     notices: Vec<String>,
+    /// Models that finished loading after a change the user made, to announce.
+    ready: Vec<String>,
     load_failed: bool,
     waker: Option<Waker>,
 }
@@ -56,6 +58,7 @@ impl Residency {
                 dictating: false,
                 last_activity: t,
                 notices: vec![],
+                ready: vec![],
                 load_failed: false,
                 waker: None,
             }),
@@ -64,7 +67,7 @@ impl Residency {
             now,
         }));
         let mut st = r.lock();
-        r.begin_load(&mut st, model_id);
+        r.begin_load(&mut st, model_id, false);
         drop(st);
         r
     }
@@ -73,7 +76,9 @@ impl Residency {
         self.0.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn begin_load(&self, st: &mut State, id: &str) {
+    /// `announce`: the load follows a change the user made, so its success is reported
+    /// through [`Self::take_ready`] (a reload for a Dictation or at start is not).
+    fn begin_load(&self, st: &mut State, id: &str, announce: bool) {
         st.generation += 1;
         st.loading = Some(id.to_string());
         st.load_failed = false;
@@ -85,6 +90,9 @@ impl Residency {
             let mut st = me.lock();
             if st.generation == generation {
                 st.loading = None;
+                if announce && result.is_ok() {
+                    st.ready.push(id.clone());
+                }
                 match result {
                     Ok(m) if st.model.is_none() => st.model = Some((id, m)),
                     Ok(m) => st.staged = Some((id, m)),
@@ -125,7 +133,7 @@ impl Residency {
         st.dictating = true;
         if st.model.is_none() && st.loading.is_none() {
             let id = st.wanted.clone();
-            self.begin_load(&mut st, &id);
+            self.begin_load(&mut st, &id, false);
         }
     }
 
@@ -171,7 +179,7 @@ impl Residency {
         st.memory = memory;
         if memory == ModelMemory::KeepLoaded && st.model.is_none() && st.loading.is_none() {
             let id = st.wanted.clone();
-            self.begin_load(&mut st, &id);
+            self.begin_load(&mut st, &id, false);
         }
     }
 
@@ -192,12 +200,16 @@ impl Residency {
             }
             Some(_) => {
                 st.staged = None;
-                self.begin_load(&mut st, id);
+                self.begin_load(&mut st, id, true);
             }
             None => {
                 // Unloaded (or the first load is in flight, or it failed).
-                if st.loading.is_some() || st.memory == ModelMemory::KeepLoaded || st.dictating {
-                    self.begin_load(&mut st, id);
+                if st.loading.is_some()
+                    || st.memory == ModelMemory::KeepLoaded
+                    || st.dictating
+                    || st.load_failed
+                {
+                    self.begin_load(&mut st, id, true);
                 }
             }
         }
@@ -205,14 +217,30 @@ impl Residency {
 
     /// Load the wanted model again because how it loads changed (the GPU choice or a GPU
     /// test). The current model keeps serving until the new copy is ready; a load in flight is
-    /// restarted. An unloaded model picks up the change at its next load.
+    /// restarted, and a load that failed is tried again. An unloaded model picks up the change
+    /// at its next load.
     pub fn reload(&self) {
         let mut st = self.lock();
-        if st.model.is_some() || st.loading.is_some() {
+        if st.model.is_some() || st.loading.is_some() || st.load_failed {
             st.staged = None;
             let id = st.wanted.clone();
-            self.begin_load(&mut st, &id);
+            self.begin_load(&mut st, &id, true);
         }
+    }
+
+    /// Something changed that may let a failed load succeed now (the first Speech model was
+    /// just downloaded): try it again. Does nothing unless the last load failed.
+    pub fn retry_failed(&self) {
+        let mut st = self.lock();
+        if st.load_failed && st.model.is_none() && st.loading.is_none() {
+            let id = st.wanted.clone();
+            self.begin_load(&mut st, &id, true);
+        }
+    }
+
+    /// Models that finished loading after a model, GPU or download change, drained.
+    pub fn take_ready(&self) -> Vec<String> {
+        std::mem::take(&mut self.lock().ready)
     }
 
     /// Notices to show the user (failed loads), drained.
@@ -251,7 +279,7 @@ impl Recognizer for ResidentRecognizer {
                     return Vec::new();
                 }
                 let id = st.wanted.clone();
-                r.begin_load(&mut st, &id);
+                r.begin_load(&mut st, &id, false);
             }
             // The load is in flight: the caller's audio stays buffered meanwhile.
             st = r.0.loaded.wait(st).unwrap_or_else(|e| e.into_inner());
@@ -564,6 +592,51 @@ mod tests {
         );
         r.dictation_started();
         assert_eq!(said(&r), "small");
+    }
+
+    #[test]
+    fn only_loads_after_a_change_are_announced() {
+        let rig = Rig::new();
+        let r = rig.residency("base", ModelMemory::KeepLoaded);
+        eventually(|| r.loaded_model().is_some());
+        assert!(
+            r.take_ready().is_empty(),
+            "the start-up load is not announced"
+        );
+        r.request_model("small");
+        eventually(|| !r.is_loading());
+        assert_eq!(r.take_ready(), ["small"]);
+        r.reload();
+        eventually(|| !r.is_loading());
+        assert_eq!(r.take_ready(), ["small"]);
+        assert!(r.take_ready().is_empty());
+    }
+
+    #[test]
+    fn a_failed_first_load_is_retried_once_the_model_can_load_and_announced() {
+        let rig = Rig::new();
+        rig.failing.lock().unwrap().push("base".into());
+        let r = rig.residency("base", ModelMemory::KeepLoaded);
+        eventually(|| !r.is_loading());
+        assert_eq!(r.take_notices().len(), 1);
+        rig.failing.lock().unwrap().clear(); // the model was downloaded meanwhile
+        r.retry_failed();
+        eventually(|| r.loaded_model().is_some());
+        assert_eq!(r.take_ready(), ["base"]);
+        r.retry_failed();
+        assert_eq!(rig.load_count(), 2, "nothing to retry once loaded");
+    }
+
+    #[test]
+    fn a_gpu_change_after_a_failed_first_load_loads_the_model() {
+        let rig = Rig::new();
+        rig.failing.lock().unwrap().push("base".into());
+        let r = rig.residency("base", ModelMemory::UnloadWhenIdle);
+        eventually(|| !r.is_loading());
+        rig.failing.lock().unwrap().clear();
+        r.reload();
+        eventually(|| r.loaded_model().is_some());
+        assert_eq!(r.take_ready(), ["base"]);
     }
 
     #[test]

@@ -119,6 +119,10 @@ pub enum StartupAction {
 
 pub const NOTICE_DURATION_MS: u32 = 3000;
 
+/// Shown at the first launch while Settings opens: no Speech model yet, so nothing can load.
+pub const FIRST_RUN_NOTICE: &str =
+    "Welcome to Aloud Type. Waiting for setup: download a Speech model in Settings.";
+
 pub fn startup_action(first_run_complete: bool, dictation_key: &[String]) -> StartupAction {
     if !first_run_complete {
         return StartupAction::OpenSettings;

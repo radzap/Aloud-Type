@@ -752,6 +752,19 @@ pub fn test_all_on_disk(
     }
 }
 
+fn adapter_names(adapters: &[GpuDevice]) -> Vec<String> {
+    let mut names: Vec<String> = adapters.iter().map(|d| d.name.clone()).collect();
+    names.dedup();
+    names
+}
+
+/// Save the installed adapters for Settings without loading a model (first launch: there is
+/// no Speech model yet, so [`open_for_host`] does not run until one is downloaded).
+pub fn save_adapters(state_path: &Path, adapters: &[GpuDevice]) {
+    let names = adapter_names(adapters);
+    update_state(state_path, |st| st.gpu_adapters = names);
+}
+
 /// Open the recognizer for the resident process: no test runs here. The adapter list is saved
 /// for Settings, the device comes from [`select`], and only a selected device loads the GPU
 /// backend. A GPU load that crashed the process (marker still set at the next start) disables
@@ -762,8 +775,7 @@ pub fn open_for_host(
     state_path: &Path,
     adapters: &[GpuDevice],
 ) -> GpuFallback {
-    let mut names: Vec<String> = adapters.iter().map(|d| d.name.clone()).collect();
-    names.dedup();
+    let names = adapter_names(adapters);
     update_state(state_path, |st| {
         if st.gpu_load_pending {
             st.gpu_load_pending = false;

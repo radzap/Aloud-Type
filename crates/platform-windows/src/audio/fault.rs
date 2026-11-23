@@ -9,6 +9,9 @@ pub enum CaptureErrorKind {
     /// Default endpoint rerouted; the stream keeps running.
     DeviceChanged,
     StreamInvalidated,
+    /// A buffer underrun/overrun or gap in the audio: a glitch, the stream keeps running.
+    /// Some drivers (Intel Smart Sound microphone arrays) report one right after the stream opens.
+    Glitch,
     HostUnavailable,
     UnsupportedConfig,
     PermissionDenied,
@@ -42,14 +45,14 @@ pub enum Phase {
 
 pub const E_ACCESSDENIED: u32 = 0x8007_0005;
 
-/// `None` means the error is not a fault (default device rerouted).
+/// `None` means the error is not a fault (default device rerouted, or a glitch).
 pub fn classify(err: &CaptureError, phase: Phase) -> Option<FaultReason> {
     if err.hresult == Some(E_ACCESSDENIED) {
         return Some(FaultReason::Blocked);
     }
     use CaptureErrorKind::*;
     match err.kind {
-        DeviceChanged => None,
+        DeviceChanged | Glitch => None,
         PermissionDenied => Some(FaultReason::Blocked),
         DeviceBusy => Some(FaultReason::InUse),
         DeviceNotAvailable => Some(match phase {
@@ -112,6 +115,12 @@ mod tests {
     #[test]
     fn default_reroute_is_not_a_fault() {
         assert_eq!(c(DeviceChanged, Phase::Streaming), None);
+    }
+
+    #[test]
+    fn an_audio_glitch_is_not_a_fault() {
+        assert_eq!(c(Glitch, Phase::Streaming), None);
+        assert_eq!(c(Glitch, Phase::Opening), None);
     }
 
     #[test]

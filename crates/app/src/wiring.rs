@@ -39,11 +39,60 @@ pub fn dictation_settings(s: &Settings) -> DictationSettings {
             Language::Auto => "auto".into(),
             Language::Fixed(c) => c.clone(),
         },
+        // English-only models always dictate English.
+        language_from_keyboard: s.language_from_keyboard
+            && aloud_type_models::language_setting_enabled(&s.speech_model),
         microphone: s
             .microphone
             .clone()
             .map_or(Mic::SystemDefault, Mic::Specific),
     }
+}
+
+/// The language one Dictation uses: the keyboard layout's (a locale name such as "sk-SK", read
+/// when the Dictation key was pressed) when that is on and Whisper knows it, else the setting.
+pub fn dictation_language(d: &DictationSettings, keyboard_locale: Option<&str>) -> String {
+    if d.language_from_keyboard {
+        if let Some(code) =
+            keyboard_locale.and_then(aloud_type_models::languages::whisper_language_for_locale)
+        {
+            return code.to_string();
+        }
+    }
+    d.language.clone()
+}
+
+/// The notice shown when the language Dictation uses was changed in Settings.
+pub fn language_notice(s: &Settings) -> String {
+    let what = if !aloud_type_models::language_setting_enabled(&s.speech_model) {
+        "English".to_string()
+    } else if s.language_from_keyboard {
+        "follows the keyboard layout".to_string()
+    } else {
+        match &s.language {
+            Language::Auto => "detected automatically".to_string(),
+            Language::Fixed(c) => aloud_type_models::languages::language_name(c)
+                .map_or_else(|| c.clone(), str::to_string),
+        }
+    };
+    format!("Dictation language: {what}")
+}
+
+/// The notice shown when a Speech model finished loading after a change (model, GPU, first
+/// download). `gpu` is the device it runs on, `None` for the CPU.
+pub fn model_ready_notice(model_id: &str, gpu: Option<&str>) -> String {
+    let name = aloud_type_models::find(model_id).map_or(model_id, |m| m.label);
+    let on = match gpu {
+        // Adapter names carry trademark marks: "Intel(R) Iris(R) Xe Graphics".
+        Some(d) => ["(R)", "(TM)", "(C)"]
+            .iter()
+            .fold(d.to_string(), |s, m| s.replace(m, ""))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        None => "the CPU".to_string(),
+    };
+    format!("Speech model {name} ready on {on}")
 }
 
 /// What the host can change live. Implemented by `main.rs` over the real hook,
@@ -133,6 +182,9 @@ impl<T: Targets> SettingsHost<T> {
         // A model change already loads with the new GPU choice.
         if !model_changed && old.is_some_and(|o| o.gpu != new.gpu) {
             self.targets.reload_gpu();
+        }
+        if old.is_some_and(|o| language_notice(o) != language_notice(&new)) {
+            self.targets.notify(&language_notice(&new));
         }
         *self.current.borrow_mut() = dictation_settings(&new);
         self.applied = Some(new);

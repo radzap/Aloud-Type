@@ -40,6 +40,9 @@ pub struct Settings {
     pub microphone: Option<String>,
     pub speech_model: String,
     pub language: Language,
+    /// Multilingual models only: dictate in the language of the keyboard layout in use when
+    /// the Dictation key is pressed; `language` is the fallback when Whisper does not know it.
+    pub language_from_keyboard: bool,
     pub gpu: Gpu,
     pub model_memory: ModelMemory,
     pub launch_at_login: bool,
@@ -60,6 +63,7 @@ impl Default for Settings {
             microphone: None,
             speech_model: DEFAULT_SPEECH_MODEL.into(),
             language: Language::Fixed("en".into()),
+            language_from_keyboard: false,
             gpu: Gpu::Auto,
             model_memory: ModelMemory::KeepLoaded,
             launch_at_login: false,
@@ -114,6 +118,8 @@ impl Schema for Settings {
             microphone: h::get_str(doc, "microphone")?.filter(|s| !s.is_empty()),
             speech_model: h::get_str(doc, "speech_model")?.unwrap_or(d.speech_model),
             language,
+            language_from_keyboard: h::get_bool(doc, "language_from_keyboard")?
+                .unwrap_or(d.language_from_keyboard),
             gpu,
             model_memory: parse_enum(doc, "model_memory", ModelMemory::parse)?
                 .unwrap_or(d.model_memory),
@@ -147,6 +153,9 @@ impl Schema for Settings {
                 Language::Fixed(c) => c,
             },
         );
+        if self.language_from_keyboard || doc.get("language_from_keyboard").is_some() {
+            h::set_bool(doc, "language_from_keyboard", self.language_from_keyboard);
+        }
         let gpu = match &self.gpu {
             Gpu::Auto => "auto".to_string(),
             Gpu::CpuOnly => "cpu".to_string(),

@@ -77,7 +77,15 @@ impl App {
             ),
             workers: Vec::new(),
         };
-        (app, Task::none())
+        let mut app = app;
+        // The resident process may still be saving the GPUs (first launch) or loading the
+        // model: re-read its state for a while so the GPU list and status fill in.
+        let task = if app.items.watch_gpu() {
+            tick_after_millis(1000, Message::GpuTick)
+        } else {
+            Task::none()
+        };
+        (app, task)
     }
 
     fn now(&self) -> u64 {
@@ -150,13 +158,19 @@ impl App {
                     self.workers.retain(|(w, _)| w != id);
                     self.models.finish_download(id, *r);
                 }
+                let mut tasks = Vec::new();
                 if !finished.is_empty() {
-                    // A finished download may have switched to its model.
+                    // A finished download may have switched to its model, which the resident
+                    // process now loads (and says which device it runs on).
                     self.items.reload();
+                    if self.items.watch_gpu() {
+                        tasks.push(tick_after_millis(1000, Message::GpuTick));
+                    }
                 }
                 if !self.workers.is_empty() {
-                    return tick_after_millis(300, Message::DownloadTick);
+                    tasks.push(tick_after_millis(300, Message::DownloadTick));
                 }
+                return Task::batch(tasks);
             }
             Message::StartCapture => {
                 self.warning = None;

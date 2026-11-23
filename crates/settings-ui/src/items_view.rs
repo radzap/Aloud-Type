@@ -9,7 +9,7 @@ use aloud_type_config::{
     VerticalPosition,
 };
 use iced::alignment::Vertical::Center;
-use iced::widget::{button, column, container, pick_list, row, space, text, toggler};
+use iced::widget::{button, checkbox, column, container, pick_list, row, space, text, toggler};
 use iced::Length::Fill;
 use iced::{font, Element, Font};
 use std::fmt;
@@ -35,6 +35,7 @@ fn choice<T>(value: T, label: &str) -> Choice<T> {
 pub enum ItemsMsg {
     Microphone(Choice<Option<String>>),
     Language(Choice<Language>),
+    LanguageFromKeyboard(bool),
     Style(Choice<IndicatorStyle>),
     Vertical(Choice<VerticalPosition>),
     Horizontal(Choice<HorizontalPosition>),
@@ -69,6 +70,12 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
         self.session.poll_gpu()
     }
 
+    /// Keep re-reading the GPU state for a while (the resident process is about to write it).
+    /// True when polling should start.
+    pub fn watch_gpu(&mut self) -> bool {
+        self.session.watch_gpu()
+    }
+
     /// Apply a change. True when it started GPU work worth watching (a test or a reload).
     pub fn update(&mut self, m: ItemsMsg) -> bool {
         let gpu_work = matches!(m, ItemsMsg::Gpu(_) | ItemsMsg::RetestGpu);
@@ -77,6 +84,7 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
             ItemsMsg::RetestGpu => self.session.retest_gpu(),
             ItemsMsg::Microphone(c) => self.session.set_microphone(c.value),
             ItemsMsg::Language(c) => self.session.set_language(c.value),
+            ItemsMsg::LanguageFromKeyboard(on) => self.session.set_language_from_keyboard(on),
             ItemsMsg::Style(c) => self.session.set_indicator_style(c.value),
             ItemsMsg::Vertical(c) => self.session.set_vertical(c.value),
             ItemsMsg::Horizontal(c) => self.session.set_horizontal(c.value),
@@ -114,10 +122,25 @@ impl<L: LoginItem, M: MicLister> ItemsPanel<L, M> {
         );
         let lang_sel = langs.iter().find(|c| c.value == s.language).cloned();
         if self.session.language_enabled() {
-            labelled(
-                "Language",
-                pick_list(langs, lang_sel, ItemsMsg::Language).width(Fill),
-            )
+            let from_keyboard = s.language_from_keyboard;
+            column![
+                labelled(
+                    if from_keyboard {
+                        "Language (when the keyboard's language is not supported)"
+                    } else {
+                        "Language"
+                    },
+                    pick_list(langs, lang_sel, ItemsMsg::Language).width(Fill),
+                ),
+                checkbox(from_keyboard)
+                    .label("Use the language of the current keyboard layout")
+                    .on_toggle(ItemsMsg::LanguageFromKeyboard)
+                    .size(16)
+                    .text_size(13),
+                muted("Read when you press the Dictation key, so switching the layout (Win+Space) switches the language."),
+            ]
+            .spacing(6)
+            .into()
         } else {
             labelled(
                 "Language",

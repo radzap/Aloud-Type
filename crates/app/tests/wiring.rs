@@ -115,7 +115,12 @@ fn reload_applies_only_what_changed_without_restart() {
     h.on_command(Command::ReloadSettings);
     assert_eq!(
         log.take(),
-        vec!["style orb", "place bottom left", "memory unload-when-idle"]
+        vec![
+            "style orb",
+            "place bottom left",
+            "memory unload-when-idle",
+            "notify Dictation language: detected automatically"
+        ]
     );
     let d = h.dictation_settings();
     assert_eq!(d.borrow().language, "auto");
@@ -308,4 +313,66 @@ fn nothing_is_spawned_before_first_run_or_when_nothing_is_due() {
         .unwrap();
     bg.check(&s, &st, d.path(), &mut sp);
     assert_eq!(sp.0, 0, "voice model present and no confirmed GPU");
+}
+
+#[test]
+fn the_keyboard_layout_language_is_used_only_when_on_and_known_to_whisper() {
+    let mut s = Settings {
+        language: Language::Fixed("de".into()),
+        ..Settings::default()
+    };
+    let d = dictation_settings(&s);
+    assert_eq!(
+        dictation_language(&d, Some("sk-SK")),
+        "de",
+        "off: the setting"
+    );
+    s.language_from_keyboard = true;
+    let d = dictation_settings(&s);
+    assert_eq!(dictation_language(&d, Some("sk-SK")), "sk");
+    assert_eq!(dictation_language(&d, Some("nb-NO")), "no");
+    assert_eq!(
+        dictation_language(&d, Some("chr-Cher-US")),
+        "de",
+        "unknown: fallback"
+    );
+    assert_eq!(dictation_language(&d, None), "de", "no window: fallback");
+    s.speech_model = "base.en-q5_1".into();
+    s.language = Language::Fixed("en".into());
+    let d = dictation_settings(&s);
+    assert!(
+        !d.language_from_keyboard,
+        "English-only models stay English"
+    );
+    assert_eq!(dictation_language(&d, Some("sk-SK")), "en");
+}
+
+#[test]
+fn a_changed_language_is_announced_once() {
+    let (mut h, log, cur, _) = host(Settings::default());
+    h.reload();
+    log.take();
+    cur.borrow_mut().language = Language::Fixed("sk".into());
+    h.reload();
+    assert_eq!(log.take(), vec!["notify Dictation language: Slovak"]);
+    cur.borrow_mut().language_from_keyboard = true;
+    h.reload();
+    assert_eq!(
+        log.take(),
+        vec!["notify Dictation language: follows the keyboard layout"]
+    );
+    h.reload();
+    assert!(log.take().is_empty());
+}
+
+#[test]
+fn the_model_ready_notice_names_the_model_and_the_device() {
+    assert_eq!(
+        model_ready_notice("small-q5_1", Some("Intel(R) Iris(R) Xe Graphics")),
+        format!(
+            "Speech model {} ready on Intel Iris Xe Graphics",
+            aloud_type_models::find("small-q5_1").unwrap().label
+        )
+    );
+    assert!(model_ready_notice("base-q5_1", None).ends_with("ready on the CPU"));
 }

@@ -1,6 +1,8 @@
 //! The Speech model lineup and the rule that only verified files are loaded.
 //! No network code lives here: downloads belong to the Settings process, the
 //! resident process only calls [`verified_path`].
+pub mod languages;
+
 use aloud_type_config::{Gpu, Settings, State, DEFAULT_SPEECH_MODEL};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;

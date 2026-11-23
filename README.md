@@ -70,7 +70,7 @@ To change settings later, or to exit, use the tray icon.
 | Dictation key | Any key or key combination |
 | Microphone | System default or a specific device |
 | Speech model | See the table below |
-| Language | Auto-detect or a fixed language (English by default) |
+| Language | Auto-detect or a fixed language (English by default). Multilingual models can instead follow the keyboard layout in use when you press the Dictation key |
 | GPU | Auto, CPU only, or a specific graphics card |
 | Model memory | Keep loaded (instant start) or unload when idle (saves memory) |
 | Listening indicator | Trace strip, bar pill or orb; placed top or bottom, left, centre or right |

@@ -27,7 +27,10 @@ pub enum Mic {
 /// Settings read when a Dictation starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DictationSettings {
+    /// Whisper language code, or "auto". The fallback when `language_from_keyboard` is set.
     pub language: String,
+    /// Use the language of the keyboard layout active when the Dictation key is pressed.
+    pub language_from_keyboard: bool,
     pub microphone: Mic,
 }
 
@@ -35,6 +38,7 @@ impl Default for DictationSettings {
     fn default() -> Self {
         Self {
             language: "auto".into(),
+            language_from_keyboard: false,
             microphone: Mic::SystemDefault,
         }
     }

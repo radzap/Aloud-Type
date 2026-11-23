@@ -93,6 +93,7 @@ fn holding_the_key_while_the_jfk_clip_plays_types_it_streaming_and_flushes_on_re
         typing_faults: Box::new(sink.clone()),
         settings: Box::new(|| DictationSettings {
             language: "en".into(),
+            language_from_keyboard: false,
             microphone: Mic::SystemDefault,
         }),
         config: ControllerConfig::default(),

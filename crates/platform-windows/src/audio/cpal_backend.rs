@@ -16,6 +16,7 @@ pub fn map_error(e: &cpal::Error) -> CaptureError {
         ErrorKind::DeviceBusy => CaptureErrorKind::DeviceBusy,
         ErrorKind::DeviceChanged => CaptureErrorKind::DeviceChanged,
         ErrorKind::StreamInvalidated => CaptureErrorKind::StreamInvalidated,
+        ErrorKind::Xrun => CaptureErrorKind::Glitch,
         ErrorKind::HostUnavailable => CaptureErrorKind::HostUnavailable,
         ErrorKind::UnsupportedConfig => CaptureErrorKind::UnsupportedConfig,
         ErrorKind::PermissionDenied => CaptureErrorKind::PermissionDenied,
@@ -116,6 +117,20 @@ mod tests {
     fn kinds_map_across() {
         let e = cpal::Error::with_message(ErrorKind::DeviceBusy, "x");
         assert_eq!(map_error(&e).kind, CaptureErrorKind::DeviceBusy);
+    }
+
+    /// Intel Smart Sound arrays report an xrun right after the stream opens; it must not
+    /// end the Dictation.
+    #[test]
+    fn an_xrun_is_a_glitch_not_a_fault() {
+        let e =
+            cpal::Error::with_message(ErrorKind::Xrun, "A buffer underrun or overrun occurred.");
+        let mapped = map_error(&e);
+        assert_eq!(mapped.kind, CaptureErrorKind::Glitch);
+        assert_eq!(
+            crate::audio::fault::classify(&mapped, crate::audio::fault::Phase::Streaming),
+            None
+        );
     }
 
     #[test]
